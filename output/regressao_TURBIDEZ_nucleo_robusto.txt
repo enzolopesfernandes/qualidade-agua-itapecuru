@@ -1,0 +1,31 @@
+                            OLS Regression Results                            
+==============================================================================
+Dep. Variable:               TURBIDEZ   R-squared:                       0.110
+Model:                            OLS   Adj. R-squared:                  0.095
+Method:                 Least Squares   F-statistic:                     7.412
+Date:                Tue, 11 Aug 2026   Prob (F-statistic):           1.43e-06
+Time:                        18:26:34   Log-Likelihood:                -1652.9
+No. Observations:                 305   AIC:                             3318.
+Df Residuals:                     299   BIC:                             3340.
+Df Model:                           5                                         
+Covariance Type:            nonrobust                                         
+============================================================================================
+                               coef    std err          t      P>|t|      [0.025      0.975]
+--------------------------------------------------------------------------------------------
+const                      129.1270     59.273      2.179      0.030      12.483     245.772
+PH                         -15.7117      3.615     -4.347      0.000     -22.825      -8.599
+TEMPERATURA_AGUA            -3.4025      1.753     -1.941      0.053      -6.852       0.047
+COND_ELETRICA_ESPECIFICA     0.0054      0.002      2.971      0.003       0.002       0.009
+TEMPERATURA_AR               4.7004      1.857      2.532      0.012       1.047       8.354
+OXIGENIO_DISSOLVIDO          0.2452      1.301      0.188      0.851      -2.315       2.806
+==============================================================================
+Omnibus:                      303.131   Durbin-Watson:                   1.686
+Prob(Omnibus):                  0.000   Jarque-Bera (JB):            10740.383
+Skew:                           4.096   Prob(JB):                         0.00
+Kurtosis:                      30.894   Cond. No.                     3.30e+04
+==============================================================================
+
+Notes:
+[1] Standard Errors assume that the covariance matrix of the errors is correctly specified.
+[2] The condition number is large, 3.3e+04. This might indicate that there are
+strong multicollinearity or other numerical problems.

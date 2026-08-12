@@ -1,0 +1,5 @@
+[AVISO] FLUORETO_TOTAL: N=20 amostras validas -- amostra pequena, interpretar histograma/boxplot com cautela.
+[AVISO] BROMETO_TOTAL: N=20 amostras validas -- amostra pequena, interpretar histograma/boxplot com cautela.
+[AVISO] NITRITO: N=20 amostras validas -- amostra pequena, interpretar histograma/boxplot com cautela.
+[AVISO] SULFATO: N=20 amostras validas -- amostra pequena, interpretar histograma/boxplot com cautela.
+[AVISO] FOSFATO_TOTAL: N=20 amostras validas -- amostra pequena, interpretar histograma/boxplot com cautela.

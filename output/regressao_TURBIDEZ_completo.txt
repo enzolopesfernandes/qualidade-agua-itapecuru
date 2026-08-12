@@ -1,0 +1,38 @@
+                            OLS Regression Results                            
+==============================================================================
+Dep. Variable:               TURBIDEZ   R-squared:                       0.643
+Model:                            OLS   Adj. R-squared:                  0.457
+Method:                 Least Squares   F-statistic:                     3.452
+Date:                Tue, 11 Aug 2026   Prob (F-statistic):            0.00520
+Time:                        18:26:34   Log-Likelihood:                -166.26
+No. Observations:                  36   AIC:                             358.5
+Df Residuals:                      23   BIC:                             379.1
+Df Model:                          12                                         
+Covariance Type:            nonrobust                                         
+============================================================================================
+                               coef    std err          t      P>|t|      [0.025      0.975]
+--------------------------------------------------------------------------------------------
+const                     -270.6633    176.068     -1.537      0.138    -634.887      93.560
+PH                          39.8358     20.635      1.930      0.066      -2.851      82.523
+TEMPERATURA_AGUA            10.2716      6.017      1.707      0.101      -2.176      22.720
+COND_ELETRICA_ESPECIFICA     0.0097      0.119      0.081      0.936      -0.237       0.257
+TEMPERATURA_AR              -2.1619      2.936     -0.736      0.469      -8.235       3.912
+OXIGENIO_DISSOLVIDO        -26.2519      8.271     -3.174      0.004     -43.362      -9.141
+ALCALINIDADE                -1.1761      0.850     -1.383      0.180      -2.935       0.583
+SOLIDOS_DISSOLVIDOS          0.0612      0.067      0.908      0.373      -0.078       0.201
+TRANSPARENCIA_AGUA         -81.2234     33.382     -2.433      0.023    -150.280     -12.167
+SOLIDOS_SUSPENSOS            0.4848      0.442      1.097      0.284      -0.429       1.399
+PROFUNDIDADE                -7.2671     17.489     -0.416      0.682     -43.445      28.911
+CLORETO_TOTAL               -0.0689      0.093     -0.740      0.467      -0.262       0.124
+NITRATO                      1.5074      1.309      1.151      0.261      -1.201       4.216
+==============================================================================
+Omnibus:                        2.313   Durbin-Watson:                   1.774
+Prob(Omnibus):                  0.315   Jarque-Bera (JB):                1.273
+Skew:                          -0.405   Prob(JB):                        0.529
+Kurtosis:                       3.438   Cond. No.                     7.32e+03
+==============================================================================
+
+Notes:
+[1] Standard Errors assume that the covariance matrix of the errors is correctly specified.
+[2] The condition number is large, 7.32e+03. This might indicate that there are
+strong multicollinearity or other numerical problems.

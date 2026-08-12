@@ -1,0 +1,32 @@
+                            OLS Regression Results                            
+==============================================================================
+Dep. Variable:                  VAZAO   R-squared:                       0.430
+Model:                            OLS   Adj. R-squared:                  0.288
+Method:                 Least Squares   F-statistic:                     3.019
+Date:                Tue, 11 Aug 2026   Prob (F-statistic):             0.0242
+Time:                        18:26:34   Log-Likelihood:                -191.79
+No. Observations:                  31   AIC:                             397.6
+Df Residuals:                      24   BIC:                             407.6
+Df Model:                           6                                         
+Covariance Type:            nonrobust                                         
+============================================================================================
+                               coef    std err          t      P>|t|      [0.025      0.975]
+--------------------------------------------------------------------------------------------
+const                     1859.0710    627.760      2.961      0.007     563.439    3154.703
+PH                          53.9701     73.811      0.731      0.472     -98.369     206.309
+TURBIDEZ                     0.7920      0.783      1.012      0.322      -0.824       2.408
+TEMPERATURA_AGUA           -73.2713     30.620     -2.393      0.025    -136.467     -10.076
+COND_ELETRICA_ESPECIFICA    -1.6807      0.959     -1.753      0.092      -3.659       0.298
+TEMPERATURA_AR              22.8054     15.493      1.472      0.154      -9.170      54.781
+OXIGENIO_DISSOLVIDO        -73.9797     34.159     -2.166      0.040    -144.480      -3.480
+==============================================================================
+Omnibus:                       38.630   Durbin-Watson:                   1.939
+Prob(Omnibus):                  0.000   Jarque-Bera (JB):              130.102
+Skew:                           2.605   Prob(JB):                     5.61e-29
+Kurtosis:                      11.578   Cond. No.                     2.59e+03
+==============================================================================
+
+Notes:
+[1] Standard Errors assume that the covariance matrix of the errors is correctly specified.
+[2] The condition number is large, 2.59e+03. This might indicate that there are
+strong multicollinearity or other numerical problems.
