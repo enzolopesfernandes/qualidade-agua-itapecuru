@@ -3,8 +3,8 @@
 Dep. Variable:               TURBIDEZ   R-squared:                       0.110
 Model:                            OLS   Adj. R-squared:                  0.095
 Method:                 Least Squares   F-statistic:                     7.412
-Date:                Tue, 11 Aug 2026   Prob (F-statistic):           1.43e-06
-Time:                        18:26:34   Log-Likelihood:                -1652.9
+Date:                Thu, 13 Aug 2026   Prob (F-statistic):           1.43e-06
+Time:                        19:32:59   Log-Likelihood:                -1652.9
 No. Observations:                 305   AIC:                             3318.
 Df Residuals:                     299   BIC:                             3340.
 Df Model:                           5                                         

@@ -12,13 +12,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import statsmodels.api as sm
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
+from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
+from config.estilo import CORES, CORES_SEQUENCIA  # noqa: E402
 from config.nomes_unidades import rotulo  # noqa: E402
 
 OUTPUT_DIR = BASE_DIR / "output"
@@ -27,21 +30,26 @@ FIG_DIR = OUTPUT_DIR / "figuras"
 RANDOM_STATE = 42
 
 
-def figura_histograma_boxplot(serie, outlier_mask=None, titulo="", rotulo_eixo=None, cor="#4C72B0", figsize=(11, 4.5)):
+def aplicar_fundo_branco(fig, *axes) -> None:
+    """Fundo branco puro (#FFFFFF) no figure e em cada eixo -- toda figura
+    estatica deste projeto usa isso, para contrastar com o fundo creme da
+    pagina do dashboard onde a figura e exibida (Galeria)."""
+    fig.patch.set_facecolor(CORES["fundo_grafico"])
+    for ax in axes:
+        ax.set_facecolor(CORES["fundo_grafico"])
+
+
+def figura_histograma_boxplot(serie, outlier_mask=None, titulo="", rotulo_eixo=None, cor=None, figsize=(11, 4.5)):
     """
     Histograma + boxplot lado a lado para uma serie de valores validos de um
     parametro, com outliers (mascara booleana no mesmo indice de `serie`)
     marcados em vermelho no histograma. Usado pelo script 01 (que salva a
     figura em PNG) e pela pagina 2 do dashboard (que embute a figura ao vivo
     via st.pyplot) -- para nao duplicar essa logica em dois lugares.
-
-    A cor padrao aqui e a mesma que o script 01 sempre usou ("#4C72B0", azul
-    seaborn) -- NAO foi trocada para o azul-petroleo do dashboard, para nao
-    mudar retroativamente as figuras estaticas ja aprovadas em output/figuras
-    sem pedido explicito. O dashboard passa `cor=CORES["petroleo"]`
-    explicitamente para usar a paleta nova so ali.
     """
+    cor = cor or CORES["petroleo"]
     fig, axes = plt.subplots(1, 2, figsize=figsize)
+    aplicar_fundo_branco(fig, *axes)
     if titulo:
         fig.suptitle(titulo)
 
@@ -66,11 +74,11 @@ def figura_histograma_boxplot(serie, outlier_mask=None, titulo="", rotulo_eixo=N
     return fig
 
 
-def figura_histograma(serie, outlier_mask=None, rotulo_eixo=None, cor="#1f6f78", figsize=(9, 4.5)):
+def figura_histograma(serie, outlier_mask=None, rotulo_eixo=None, cor=None, figsize=(9, 4.5)):
     """
-    Apenas o histograma (sem o boxplot ao lado) no estilo editorial do
-    dashboard -- usado pela pagina 2 (Analise Univariada), que decidiu manter
-    somente o histograma na visualizacao interativa. Nao mexe em
+    Apenas o histograma (sem o boxplot ao lado) no estilo do dashboard --
+    usado pela pagina 2 (Analise Univariada), que decidiu manter somente o
+    histograma na visualizacao interativa. Nao mexe em
     figura_histograma_boxplot() acima, que continua gerando as figuras
     estaticas (histograma+boxplot) do script 01 em output/figuras/.
 
@@ -80,21 +88,139 @@ def figura_histograma(serie, outlier_mask=None, rotulo_eixo=None, cor="#1f6f78",
     pagina 2). O parametro continua aqui so para nao quebrar a assinatura
     usada pela pagina.
     """
+    cor = cor or CORES["petroleo"]
     fig, ax = plt.subplots(figsize=figsize)
-    ax.set_facecolor("#F5F3EE")
-    fig.patch.set_facecolor("#F5F3EE")
+    aplicar_fundo_branco(fig, ax)
 
-    sns.histplot(serie, kde=True, ax=ax, color=cor, edgecolor="#F5F3EE")
+    sns.histplot(serie, kde=True, ax=ax, color=cor, edgecolor=CORES["fundo_grafico"])
     if rotulo_eixo:
         ax.set_xlabel(rotulo_eixo)
     ax.set_ylabel("Contagem")
-    ax.grid(axis="y", color="#E4DFD2", linewidth=0.8)
+    ax.grid(axis="y", color=CORES["grade_grafico"], linewidth=0.8)
     ax.set_axisbelow(True)
     for spine in ("top", "right", "left"):
         ax.spines[spine].set_visible(False)
     ax.spines["bottom"].set_color("#8c8880")
     fig.tight_layout()
     return fig
+
+
+def ajustar_ols(df, alvo, preditores, min_n_por_preditor=5):
+    """
+    Regressao OLS (statsmodels) de `alvo` sobre `preditores`, com coeficientes
+    padronizados (z-score em X e y, para comparar magnitude de efeito entre
+    variaveis de unidades diferentes) e VIF por preditor. Usada pelo script
+    02 (bacia inteira, salva em disco) e pela pagina 3 do dashboard (ao vivo,
+    por corpo d'agua -- ver computar_regressao_recorte() nesta funcao).
+
+    Retorna None se N <= numero de preditores (matriz singular, nao
+    ajustavel). Nao aplica nenhum corte por `min_n_por_preditor` alem disso
+    -- esse parametro so afeta a razao reportada em resultado["razao_n_p"],
+    que o chamador usa para decidir se trata o resultado como exploratorio
+    (ou se nem mostra, no caso do recorte por corpo d'agua).
+    """
+    cols = [alvo] + preditores
+    dados = df[cols].dropna()
+    n, p = dados.shape[0], len(preditores)
+
+    if n <= p:
+        return None
+
+    y = dados[alvo]
+    X = sm.add_constant(dados[preditores])
+    modelo = sm.OLS(y, X).fit()
+
+    y_z = (y - y.mean()) / y.std()
+    X_z = (dados[preditores] - dados[preditores].mean()) / dados[preditores].std()
+    X_z = sm.add_constant(X_z)
+    modelo_padronizado = sm.OLS(y_z, X_z).fit()
+
+    vif = pd.Series(
+        [variance_inflation_factor(X.values, i) for i in range(1, X.shape[1])],
+        index=preditores,
+    )
+
+    return {
+        "alvo": alvo,
+        "preditores": preditores,
+        "n": n,
+        "p": p,
+        "razao_n_p": n / p,
+        "modelo": modelo,
+        "coef_padronizado": modelo_padronizado.params.drop("const"),
+        "vif": vif,
+    }
+
+
+def calcular_pca_clustering_live(df, variaveis, id_cols=None, max_k=6):
+    """
+    Versao "em memoria" de bloco_pca_clustering() -- mesma metodologia
+    (StandardScaler + PCA + KMeans com selecao de k via silhouette), mas NAO
+    salva nada em disco nem gera figura. Usada pela pagina 3 do dashboard
+    para PCA/clustering ao vivo restrito a um corpo d'agua, onde persistir
+    arquivo a cada interacao do usuario nao faz sentido (ver
+    bloco_pca_clustering() para a versao que roda nos scripts e salva CSV/PNG).
+
+    Retorna None se N <= numero de variaveis (matriz degenerada) ou se N e
+    pequeno demais para testar nenhum k (N < 3).
+    """
+    id_cols = id_cols or []
+    completos = df[id_cols + variaveis].dropna().reset_index(drop=True)
+    n, p = completos.shape[0], len(variaveis)
+    if n <= p:
+        return None
+
+    X = completos[variaveis].values
+    scaler = StandardScaler()
+    X_z = scaler.fit_transform(X)
+
+    pca = PCA(random_state=RANDOM_STATE)
+    scores = pca.fit_transform(X_z)
+    var_exp = pca.explained_variance_ratio_
+    var_df = pd.DataFrame(
+        {
+            "COMPONENTE": [f"PC{i + 1}" for i in range(len(var_exp))],
+            "VARIANCIA_EXPLICADA_PCT": var_exp * 100,
+            "VARIANCIA_ACUMULADA_PCT": np.cumsum(var_exp) * 100,
+        }
+    )
+
+    max_k_efetivo = min(max_k, n - 1)
+    sil_scores = {}
+    for k in range(2, max_k_efetivo + 1):
+        km = KMeans(n_clusters=k, random_state=RANDOM_STATE, n_init=10)
+        labels_k = km.fit_predict(X_z)
+        sil_scores[k] = silhouette_score(X_z, labels_k)
+    if not sil_scores:
+        return None
+    melhor_k = max(sil_scores, key=sil_scores.get)
+    sil_df = pd.DataFrame({"K": list(sil_scores.keys()), "SILHOUETTE": list(sil_scores.values())})
+
+    kmeans_final = KMeans(n_clusters=melhor_k, random_state=RANDOM_STATE, n_init=10)
+    clusters = kmeans_final.fit_predict(X_z)
+
+    scores_df = completos[id_cols].copy()
+    for i in range(min(scores.shape[1], 5)):
+        scores_df[f"PC{i + 1}"] = scores[:, i]
+    scores_df["CLUSTER"] = clusters
+
+    perfil = completos[variaveis].copy()
+    perfil["CLUSTER"] = clusters
+    perfil_medias = perfil.groupby("CLUSTER")[variaveis].mean()
+    perfil_medias["N_AMOSTRAS"] = perfil.groupby("CLUSTER").size()
+
+    loadings = pd.DataFrame(pca.components_.T, index=variaveis, columns=[f"PC{i + 1}" for i in range(len(var_exp))])
+
+    return {
+        "n": n,
+        "p": p,
+        "melhor_k": melhor_k,
+        "var": var_df,
+        "silhouette": sil_df,
+        "scores": scores_df,
+        "perfil": perfil_medias.reset_index(),
+        "loadings": loadings,
+    }
 
 
 def bloco_pca_clustering(df, robusto, moderado, sufixo="", excluir_ids=None, nota_titulo="", id_col="ID_AMOSTRA"):
@@ -147,8 +273,9 @@ def bloco_pca_clustering(df, robusto, moderado, sufixo="", excluir_ids=None, not
     loadings.to_csv(OUTPUT_DIR / f"pca_loadings{sufixo}.csv")
 
     fig, ax = plt.subplots(figsize=(7, 4.5))
-    ax.bar(var_df["COMPONENTE"], var_df["VARIANCIA_EXPLICADA_PCT"], color="#4C72B0", label="% variancia explicada")
-    ax.plot(var_df["COMPONENTE"], var_df["VARIANCIA_ACUMULADA_PCT"], color="crimson", marker="o", label="% acumulada")
+    aplicar_fundo_branco(fig, ax)
+    ax.bar(var_df["COMPONENTE"], var_df["VARIANCIA_EXPLICADA_PCT"], color=CORES["petroleo"], label="% variancia explicada")
+    ax.plot(var_df["COMPONENTE"], var_df["VARIANCIA_ACUMULADA_PCT"], color=CORES["linha_tendencia"], marker="o", label="% acumulada")
     ax.set_ylabel("% da variancia")
     ax.set_title(f"PCA - variancia explicada (N={n} amostras completas, {p} variaveis) {nota_titulo}".strip())
     ax.legend()
@@ -173,8 +300,9 @@ def bloco_pca_clustering(df, robusto, moderado, sufixo="", excluir_ids=None, not
     clusters = kmeans_final.fit_predict(X_z)
 
     fig, ax = plt.subplots(figsize=(6.5, 4))
-    ax.plot(list(sil_scores.keys()), list(sil_scores.values()), marker="o", color="#4C72B0")
-    ax.axvline(melhor_k, color="crimson", linestyle="--", label=f"k escolhido = {melhor_k}")
+    aplicar_fundo_branco(fig, ax)
+    ax.plot(list(sil_scores.keys()), list(sil_scores.values()), marker="o", color=CORES["petroleo"])
+    ax.axvline(melhor_k, color=CORES["linha_tendencia"], linestyle="--", label=f"k escolhido = {melhor_k}")
     ax.set_xlabel("Numero de clusters (k)")
     ax.set_ylabel("Silhouette score")
     ax.set_title(f"Selecao de k - KMeans {nota_titulo}".strip())
@@ -196,10 +324,11 @@ def bloco_pca_clustering(df, robusto, moderado, sufixo="", excluir_ids=None, not
     perfil_medias.to_csv(OUTPUT_DIR / f"clustering_perfil_clusters{sufixo}.csv")
 
     fig, ax = plt.subplots(figsize=(8, 7))
-    palette = sns.color_palette("tab10", melhor_k)
+    aplicar_fundo_branco(fig, ax)
     for c in range(melhor_k):
         mask = clusters == c
-        ax.scatter(scores[mask, 0], scores[mask, 1], color=palette[c], label=f"cluster {c}", alpha=0.75, s=45)
+        cor_cluster = CORES_SEQUENCIA[c % len(CORES_SEQUENCIA)]
+        ax.scatter(scores[mask, 0], scores[mask, 1], color=cor_cluster, label=f"cluster {c}", s=45)
 
     escala = np.max(np.abs(scores[:, :2])) * 0.9
     for i, var in enumerate(principal):

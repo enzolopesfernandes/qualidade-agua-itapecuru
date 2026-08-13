@@ -63,15 +63,14 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
-import statsmodels.api as sm
 
 plt.rcParams["font.family"] = ["Segoe UI", "Arial", "DejaVu Sans"]  # DejaVu Sans (default) nao tem glifos de subscrito (ex. O2)
-from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
+from config.estilo import CORES  # noqa: E402
 from config.nomes_unidades import rotulo  # noqa: E402
-from _lib_analise import bloco_pca_clustering  # noqa: E402
+from _lib_analise import aplicar_fundo_branco, ajustar_ols, bloco_pca_clustering  # noqa: E402
 
 OUTPUT_DIR = BASE_DIR / "output"
 FIG_DIR = OUTPUT_DIR / "figuras"
@@ -113,8 +112,9 @@ def bloco_correlacao(df, robusto, moderado, baixo):
     corr_plot = corr.rename(index=labels, columns=labels)
 
     fig, ax = plt.subplots(figsize=(13, 11))
+    aplicar_fundo_branco(fig, ax)
     sns.heatmap(
-        corr_plot, cmap="vlag", vmin=-1, vmax=1, center=0, annot=True, fmt=".2f",
+        corr_plot, cmap="PRGn", vmin=-1, vmax=1, center=0, annot=True, fmt=".2f",
         annot_kws={"size": 6.5}, square=True, linewidths=0.4, linecolor="white",
         cbar_kws={"label": "Correlacao de Pearson"}, ax=ax,
     )
@@ -124,10 +124,10 @@ def bloco_correlacao(df, robusto, moderado, baixo):
     ax.axvline(corte, color="black", linewidth=2)
     for tick, param in zip(ax.get_xticklabels(), todos):
         if param in baixo:
-            tick.set_color("crimson")
+            tick.set_color(CORES["pouco"])
     for tick, param in zip(ax.get_yticklabels(), todos):
         if param in baixo:
-            tick.set_color("crimson")
+            tick.set_color(CORES["pouco"])
 
     ax.set_title(
         "Correlacao de Pearson pairwise - parametros fisico-quimicos\n"
@@ -144,49 +144,24 @@ def bloco_correlacao(df, robusto, moderado, baixo):
 
 # ------------------------------------------------------------- regressao ----
 
-def ajustar_ols(df, alvo, preditores, min_n_por_preditor=5):
-    cols = [alvo] + preditores
-    dados = df[cols].dropna()
-    n, p = dados.shape[0], len(preditores)
-
-    if n <= p:
-        print(f"  [INVIAVEL] {alvo} ~ {len(preditores)} preditores: N={n} <= numero de preditores ({p}). Modelo nao ajustavel (matriz singular). Pulado.")
+def ajustar_ols_com_log(df, alvo, preditores, min_n_por_preditor=5):
+    """Wrapper de ajustar_ols() (agora em _lib_analise.py, compartilhada com
+    o uso ao vivo por corpo d'agua da pagina 3) que so acrescenta o log no
+    console -- mantido aqui porque e especifico da execucao em lote deste
+    script."""
+    resultado = ajustar_ols(df, alvo, preditores, min_n_por_preditor)
+    p = len(preditores)
+    if resultado is None:
+        n = df[[alvo] + preditores].dropna().shape[0]
+        print(f"  [INVIAVEL] {alvo} ~ {p} preditores: N={n} <= numero de preditores ({p}). Modelo nao ajustavel (matriz singular). Pulado.")
         return None
 
-    razao = n / p
+    razao = resultado["razao_n_p"]
     if razao < min_n_por_preditor:
-        print(f"  [AVISO] {alvo} ~ {len(preditores)} preditores: N={n}, razao N/preditores={razao:.1f} (< {min_n_por_preditor}) -- resultado pouco confiavel, tratar como exploratorio.")
+        print(f"  [AVISO] {alvo} ~ {p} preditores: N={resultado['n']}, razao N/preditores={razao:.1f} (< {min_n_por_preditor}) -- resultado pouco confiavel, tratar como exploratorio.")
     else:
-        print(f"  [OK] {alvo} ~ {len(preditores)} preditores: N={n}, razao N/preditores={razao:.1f}.")
-
-    y = dados[alvo]
-    X = sm.add_constant(dados[preditores])
-    modelo = sm.OLS(y, X).fit()
-
-    # coeficientes padronizados (z-score em y e X) para comparar magnitude de efeito
-    y_z = (y - y.mean()) / y.std()
-    X_z = (dados[preditores] - dados[preditores].mean()) / dados[preditores].std()
-    X_z = sm.add_constant(X_z)
-    modelo_padronizado = sm.OLS(y_z, X_z).fit()
-
-    # VIF: diagnostico de colinearidade invariante a escala (diferente do numero de
-    # condicao do statsmodels, que e sensivel a diferencas de escala entre preditores
-    # e por isso pode parecer alto mesmo sem colinearidade real -- ver VIF nos csvs)
-    vif = pd.Series(
-        [variance_inflation_factor(X.values, i) for i in range(1, X.shape[1])],
-        index=preditores,
-    )
-
-    return {
-        "alvo": alvo,
-        "preditores": preditores,
-        "n": n,
-        "p": p,
-        "razao_n_p": razao,
-        "modelo": modelo,
-        "coef_padronizado": modelo_padronizado.params.drop("const"),
-        "vif": vif,
-    }
+        print(f"  [OK] {alvo} ~ {p} preditores: N={resultado['n']}, razao N/preditores={razao:.1f}.")
+    return resultado
 
 
 def salvar_resultado_regressao(resultado, label, coef_rows, metricas_rows):
@@ -233,14 +208,15 @@ def salvar_resultado_regressao(resultado, label, coef_rows, metricas_rows):
     # diagnostico: observado vs previsto + histograma de residuos
     rotulo_alvo = rotulo(alvo)
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
-    axes[0].scatter(modelo.fittedvalues, modelo.model.endog, alpha=0.6, color="#4C72B0")
+    aplicar_fundo_branco(fig, *axes)
+    axes[0].scatter(modelo.fittedvalues, modelo.model.endog, alpha=0.6, color=CORES["petroleo"])
     lims = [min(axes[0].get_xlim()[0], axes[0].get_ylim()[0]), max(axes[0].get_xlim()[1], axes[0].get_ylim()[1])]
-    axes[0].plot(lims, lims, "--", color="gray", linewidth=1)
+    axes[0].plot(lims, lims, "--", color=CORES["linha_tendencia"], linewidth=1)
     axes[0].set_xlabel(f"Previsto - {rotulo_alvo}")
     axes[0].set_ylabel(f"Observado - {rotulo_alvo}")
     axes[0].set_title(f"Observado vs. previsto (R2={modelo.rsquared:.2f})")
 
-    sns.histplot(modelo.resid, kde=True, ax=axes[1], color="#4C72B0")
+    sns.histplot(modelo.resid, kde=True, ax=axes[1], color=CORES["petroleo"])
     axes[1].set_xlabel(f"Residuo - {rotulo_alvo}")
     axes[1].set_title("Distribuicao dos residuos")
 
@@ -263,10 +239,10 @@ def bloco_regressao(df, robusto, moderado):
         preditores_completo = [p for p in principal if p != alvo]
         preditores_robusto = [p for p in robusto_reg if p != alvo]
 
-        r_completo = ajustar_ols(df, alvo, preditores_completo)
+        r_completo = ajustar_ols_com_log(df, alvo, preditores_completo)
         salvar_resultado_regressao(r_completo, "completo", coef_rows, metricas_rows)
 
-        r_robusto = ajustar_ols(df, alvo, preditores_robusto)
+        r_robusto = ajustar_ols_com_log(df, alvo, preditores_robusto)
         salvar_resultado_regressao(r_robusto, "nucleo_robusto", coef_rows, metricas_rows)
 
     pd.DataFrame(coef_rows).to_csv(OUTPUT_DIR / "regressao_coeficientes.csv", index=False)

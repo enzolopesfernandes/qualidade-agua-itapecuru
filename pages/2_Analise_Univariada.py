@@ -1,10 +1,10 @@
 """
 Pagina 2 -- Analise Univariada.
 
-Histograma interativo por parametro, com filtros no corpo da pagina. Reusa
-scripts/_lib_analise.figura_histograma() (versao so-histograma, estilo
-editorial -- ver nota na propria funcao) e dashboard_common.badge_confiabilidade()
-para o selo de confiabilidade -- nao recalcula nada, so filtra o CSV ja gerado.
+Histograma interativo (Plotly, com zoom/pan nativos) por parametro, com
+filtros no corpo da pagina. Reusa dashboard_common.figura_histograma_interativo()
+e dashboard_common.badge_confiabilidade() para o selo de confiabilidade --
+nao recalcula nada, so filtra o CSV ja gerado.
 
 Nota metodologica (repetida do script 01): os outliers marcados (coluna
 OUTLIER_<PARAMETRO>) foram calculados com o IQR do parametro inteiro (todas
@@ -25,7 +25,6 @@ import streamlit as st
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
-sys.path.insert(0, str(BASE_DIR / "scripts"))
 
 from config.estilo import CORES  # noqa: E402
 from config.nomes_unidades import rotulo  # noqa: E402
@@ -37,12 +36,12 @@ from dashboard_common import (  # noqa: E402
     carregar_dados,
     carregar_resumo_cobertura,
     categoria_parametro,
+    figura_histograma_interativo,
     layout_editorial,
     legenda_grafico,
     render_header,
     secao,
 )
-from _lib_analise import figura_histograma  # noqa: E402
 
 PLACEHOLDER = "Selecione uma opção"
 
@@ -119,6 +118,20 @@ if ano_sel:
 if periodo_sel:
     df_filtrado = df_filtrado[df_filtrado["PERIODO"].isin(periodo_sel)]
 
+n_bacia_inteira = int(df["VALIDO_PARA_CALCULO"].sum())
+if len(corpo_sel) == 1:
+    st.metric(
+        f"N — {corpo_sel[0]}", len(df_filtrado),
+        help=f"Amostras válidas neste corpo d'água (considerando também os demais filtros acima), de um "
+        f"total de {n_bacia_inteira} na bacia inteira. Corpos d'água com N baixo tornam estatísticas e "
+        "gráficos mais instáveis — interprete com cautela.",
+    )
+elif corpo_sel:
+    st.caption(
+        f"Corpos d'água selecionados: {', '.join(corpo_sel)} — **N = {len(df_filtrado)}** amostras válidas "
+        f"(bacia inteira: N = {n_bacia_inteira})."
+    )
+
 rotulo_param = rotulo(parametro_sel)
 categoria_sel = categoria_parametro(parametro_sel, resumo)
 eh_robusto_moderado = categoria_sel in ("ROBUSTO", "MODERADO")
@@ -148,8 +161,9 @@ else:
 
     outlier_mask = df_filtrado.loc[serie.index, f"OUTLIER_{parametro_sel}"] == True  # noqa: E712
 
-    fig = figura_histograma(serie, outlier_mask, rotulo_eixo=rotulo_param, cor=CORES["petroleo"])
-    st.pyplot(fig, use_container_width=True)
+    fig = figura_histograma_interativo(serie, rotulo_eixo=rotulo_param, cor=CORES["petroleo"])
+    layout_editorial(fig, height=420, margin=dict(l=10, r=10, t=20, b=10))
+    st.plotly_chart(fig, use_container_width=True)
 
     n_outliers_filtro = int(outlier_mask.sum())
     texto_outliers = f" · {n_outliers_filtro} de {n_filtro} amostras identificadas como outlier pelo método IQR"
@@ -193,7 +207,6 @@ else:
         labels={"CORPO_COM_N": "Corpo d'água", parametro_sel: rotulo_param},
         color_discrete_sequence=[CORES["petroleo"]],
     )
-    fig_comp.update_traces(marker=dict(opacity=0.6))
     layout_editorial(fig_comp, height=440, margin=dict(l=10, r=10, t=20, b=10))
     st.plotly_chart(fig_comp, use_container_width=True)
     legenda_grafico(

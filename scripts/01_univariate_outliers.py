@@ -18,10 +18,12 @@ Decisoes metodologicas (documentadas aqui porque nao sao obvias a partir do codi
    estatistico. As estatisticas descritivas (media, mediana, etc.) SAO calculadas
    por grupo, conforme pedido; so a deteccao de outliers usa o parametro inteiro.
 
-3. PERIODO e nulo para as 22 amostras de 2017 coletadas antes da numeracao de
-   periodos existir (vinham das abas "2017 REMQAS" / "2017.2 REMQAS", distinguidas
-   so por CAMPANHA 1/2). Usamos groupby(dropna=False) para essas linhas aparecerem
-   como um grupo proprio (PERIODO = NaN) em vez de serem descartadas silenciosamente.
+3. PERIODO e nulo para amostras sem numero de periodo preenchido na origem
+   (ex., historicamente, as coletas de 2017 vindas das abas "2017 REMQAS" /
+   "2017.2 REMQAS" -- a base atual ja tem PERIODO preenchido para todas as
+   340 linhas, mas o codigo continua defensivo). Usamos groupby(dropna=False)
+   para essas linhas aparecerem como um grupo proprio (PERIODO = NaN) em vez
+   de serem descartadas silenciosamente, caso a base volte a ter algum caso.
 """
 
 from __future__ import annotations

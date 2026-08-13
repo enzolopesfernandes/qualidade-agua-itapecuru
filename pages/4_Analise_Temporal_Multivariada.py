@@ -12,8 +12,8 @@ periodo pode cair em dois anos-calendario, ex. periodo 6 = 2020-2021), mas e
 um eixo cronologico legitimo: os mesmos pontos RNQA sao revisitados ao longo
 das rodadas (~6 periodos distintos por ponto em media; so 5 dos 27 pontos
 aparecem em uma unica rodada). Cada periodo e tratado como uma rodada unica,
-sem subdivisao interna. Registros sem periodo (22 amostras de 2017 antes da
-numeracao existir) ficam de fora de todo grafico temporal. Ver
+sem subdivisao interna. Eventuais registros sem periodo preenchido ficariam
+de fora de todo grafico temporal (nao ha nenhum na base atual). Ver
 dashboard_common.tabela_periodos() e agrupar_por_periodo() para o eixo
 ordenado.
 
@@ -74,8 +74,7 @@ bloco_interpretativo(
     "período pode cair em dois anos-calendário — ver rótulos do eixo X), mas é um eixo cronológico "
     "válido: os mesmos pontos RNQA são revisitados ao longo das rodadas (**~6 períodos distintos por "
     f"ponto, em média**; só **5 dos {TOTAL_PONTOS_RNQA} pontos** aparecem numa única rodada). Cada "
-    "período é tratado como uma rodada única, sem nenhuma subdivisão interna. Amostras sem período "
-    "registrado (2017, antes da numeração existir) ficam de fora destes gráficos."
+    "período é tratado como uma rodada única, sem nenhuma subdivisão interna."
 )
 
 # ============================================== 01 · series padronizadas ====
@@ -181,8 +180,8 @@ else:
 st.markdown("**Comparação em valores absolutos (dois eixos)**")
 bloco_interpretativo(
     "Aqui os dois parâmetros ficam nas **unidades originais** (não padronizadas), cada um com sua "
-    "própria escala: a legenda/eixo da **esquerda** (linha escura) é do primeiro parâmetro; a da "
-    "**direita** (linha clara, tracejada) é do segundo. Como as escalas são independentes, compare o "
+    "própria escala: a legenda/eixo da **esquerda** (linha verde, círculos) é do primeiro parâmetro; a da "
+    "**direita** (linha azul, tracejada, losangos) é do segundo. Como as escalas são independentes, compare o "
     "formato/tendência das curvas — não a posição vertical de uma linha em relação à outra."
 )
 
@@ -214,18 +213,19 @@ else:
             y=media_periodo_abs[param_esq],
             mode="lines+markers",
             name=rotulo(param_esq),
-            line=dict(color=CORES["petroleo_escuro"], width=2.6),
+            line=dict(color=CORES["petroleo"], width=2.6),
             marker=dict(size=8),
             yaxis="y1",
         )
     )
+    _cor_dir = CORES_SEQUENCIA[2]
     fig_dual.add_trace(
         go.Scatter(
             x=media_periodo_abs.index,
             y=media_periodo_abs[param_dir],
             mode="lines+markers",
             name=rotulo(param_dir),
-            line=dict(color=CORES["petroleo_claro"], width=2.6, dash="dot"),
+            line=dict(color=_cor_dir, width=2.6, dash="dot"),
             marker=dict(size=8, symbol="diamond"),
             yaxis="y2",
         )
@@ -236,12 +236,12 @@ else:
         margin=dict(l=10, r=10, t=20, b=10),
         xaxis_title="Rodada de monitoramento (PERIODO)",
         yaxis=dict(
-            title=dict(text=rotulo(param_esq), font=dict(color=CORES["petroleo_escuro"])),
-            tickfont=dict(color=CORES["petroleo_escuro"]),
+            title=dict(text=rotulo(param_esq), font=dict(color=CORES["petroleo"])),
+            tickfont=dict(color=CORES["petroleo"]),
         ),
         yaxis2=dict(
-            title=dict(text=rotulo(param_dir), font=dict(color=CORES["petroleo_claro"])),
-            tickfont=dict(color=CORES["petroleo_claro"]),
+            title=dict(text=rotulo(param_dir), font=dict(color=_cor_dir)),
+            tickfont=dict(color=_cor_dir),
             overlaying="y",
             side="right",
             showgrid=False,
@@ -251,8 +251,8 @@ else:
     fig_dual.update_xaxes(type="category", categoryorder="array", categoryarray=ORDEM_EIXO)
     st.plotly_chart(fig_dual, use_container_width=True)
     legenda_grafico(
-        f"Médias por rodada em unidade original. Esquerda (escuro): {rotulo(param_esq)}. "
-        f"Direita (claro, tracejado): {rotulo(param_dir)}. Recorte: {descricao_recorte} (N={len(df_temporal)})."
+        f"Médias por rodada em unidade original. Esquerda (verde): {rotulo(param_esq)}. "
+        f"Direita (azul, tracejado): {rotulo(param_dir)}. Recorte: {descricao_recorte} (N={len(df_temporal)})."
     )
 
 st.divider()
@@ -287,7 +287,6 @@ for coluna, param in zip([col_tb, col_vz], ["TURBIDEZ", "VAZAO"]):
         labels={"GRUPO_N": "", param: rotulo(param)},
         color_discrete_sequence=[CORES["petroleo"]],
     )
-    fig_chuva.update_traces(marker=dict(opacity=0.6))
     layout_editorial(fig_chuva, height=400, margin=dict(l=10, r=10, t=40, b=10), title=rotulo(param))
     coluna.plotly_chart(fig_chuva, use_container_width=True)
 
@@ -314,7 +313,7 @@ for i, corpo in enumerate(contagem_corpo_total.index.tolist()):
     sub_corpo = df_valido[df_valido["CORPODAGUA"] == corpo]
     media_corpo = agrupar_por_periodo(sub_corpo, tab_periodos, [param_corpos])
     eh_principal = corpo == "RIO ITAPECURU"
-    cor = CORES["petroleo"] if eh_principal else CORES_SEQUENCIA[(i + 1) % len(CORES_SEQUENCIA)]
+    cor = CORES["petroleo"] if eh_principal else CORES_SEQUENCIA[i % len(CORES_SEQUENCIA)]
     fig_corpos.add_trace(
         go.Scatter(
             x=media_corpo.index,
@@ -323,7 +322,6 @@ for i, corpo in enumerate(contagem_corpo_total.index.tolist()):
             name=f"{corpo} (N={contagem_corpo_total[corpo]})",
             line=dict(color=cor, width=3.4 if eh_principal else 1.3),
             marker=dict(size=9 if eh_principal else 6, color=cor),
-            opacity=1.0 if eh_principal else 0.65,
         )
     )
 layout_editorial(

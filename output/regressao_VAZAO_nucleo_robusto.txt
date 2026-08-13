@@ -3,8 +3,8 @@
 Dep. Variable:                  VAZAO   R-squared:                       0.430
 Model:                            OLS   Adj. R-squared:                  0.288
 Method:                 Least Squares   F-statistic:                     3.019
-Date:                Tue, 11 Aug 2026   Prob (F-statistic):             0.0242
-Time:                        18:26:34   Log-Likelihood:                -191.79
+Date:                Thu, 13 Aug 2026   Prob (F-statistic):             0.0242
+Time:                        19:32:59   Log-Likelihood:                -191.79
 No. Observations:                  31   AIC:                             397.6
 Df Residuals:                      24   BIC:                             407.6
 Df Model:                           6                                         

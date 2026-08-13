@@ -21,11 +21,13 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from streamlit_folium import st_folium
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
+sys.path.insert(0, str(BASE_DIR / "scripts"))
 
-from config.estilo import CORES, CORES_CLUSTER  # noqa: E402
+from config.estilo import CORES, CORES_CLUSTER, DIVERGENTE_CORRELACAO  # noqa: E402
 from config.nomes_unidades import rotulo  # noqa: E402
 from dashboard_common import (  # noqa: E402
     ICONE_PAGINA,
@@ -35,14 +37,17 @@ from dashboard_common import (  # noqa: E402
     carregar_dados,
     carregar_grupos_robusto_moderado_baixo,
     carregar_pca,
-    carregar_regressao,
     carregar_resumo_cobertura,
     carregar_silhouette,
+    carregar_tipologia_pontos,
+    construir_mapa_pontos,
     layout_editorial,
     legenda_grafico,
+    limites_iqr_expandido,
     render_header,
     secao,
 )
+from _lib_analise import calcular_pca_clustering_live  # noqa: E402
 
 st.set_page_config(page_title=TITULO_TRABALHO, page_icon=ICONE_PAGINA, layout="wide")
 render_header("Análise Multivariada")
@@ -58,10 +63,12 @@ resumo_cobertura = carregar_resumo_cobertura()
 
 # --------------------------------------------------------- recorte espacial ----
 
-st.markdown("**Recorte espacial** (aplica-se às seções 01 e 02, abaixo)")
+st.markdown("**Recorte espacial** (aplica-se a toda a página, seções 01 a 03 — a seção 04 é sempre bacia inteira)")
 st.caption(
-    "Regressão múltipla (03) e PCA/Clustering (04) sempre usam a bacia inteira, mesmo com um recorte "
-    "escolhido aqui — essas análises exigem uma amostra maior para serem estatisticamente válidas."
+    "Correlação (01) e Dispersão (02) recalculam direto sobre as amostras do recorte. PCA/Clustering (03) "
+    "também recalcula ao vivo quando um corpo d'água é escolhido — mas só é exibido se o N do recorte for "
+    "suficiente para o método (ver nota na seção); com N insuficiente, mostramos apenas descritivas, "
+    "histogramas e correlação, com um aviso explícito."
 )
 
 _contagem_corpo3 = df_valido["CORPODAGUA"].value_counts()
@@ -94,8 +101,12 @@ else:
     df_recorte = df_valido
     descricao_recorte3 = "toda a bacia (todos os pontos)"
 
-st.caption(f"Recorte atual: **{descricao_recorte3}** — N = {len(df_recorte)} amostras válidas.")
-if nivel_recorte3 != "Toda a bacia":
+usa_bacia_inteira = nivel_recorte3 == "Toda a bacia"
+
+if usa_bacia_inteira:
+    st.caption(f"Recorte atual: **{descricao_recorte3}** — N = {len(df_recorte)} amostras válidas.")
+else:
+    st.metric(f"N — {descricao_recorte3}", len(df_recorte), help="Amostras válidas neste recorte, de um total de " f"{len(df_valido)} na bacia inteira.")
     bloco_interpretativo(
         f"Recorte estreito (N={len(df_recorte)}): correlações e dispersões abaixo ficam mais instáveis "
         "quanto menor o N — trate como exploratório, sobretudo com poucas dezenas de amostras."
@@ -112,7 +123,7 @@ bloco_interpretativo(
     "escala de **−1 a +1**. Valores próximos de +1 indicam que as duas sobem/descem juntas; próximos "
     "de −1, que uma sobe quando a outra desce; próximos de 0, que não há relação linear detectável. "
     "Na escala de cor abaixo, **quanto mais escura/intensa a célula, mais forte a relação** — seja "
-    "positiva (tom escuro de petróleo) ou negativa (tom escuro de grafite) — e células claras no meio "
+    "positiva (tom escuro de verde) ou negativa (tom escuro de roxo) — e células claras/brancas no meio "
     "da escala indicam relação fraca. A **linha preta** separa o bloco principal de parâmetros com "
     "cobertura Robusta/Moderada (mais confiáveis) do bloco de cobertura Pouca (mais exploratório, "
     "marcado com \\*). Os pares destacados na tabela abaixo do mapa **não devem ser usados para "
@@ -147,7 +158,7 @@ fig_corr = go.Figure(
         y=list(range(n_total)),
         zmin=-1,
         zmax=1,
-        colorscale=[[0.0, CORES["petroleo"]], [0.5, CORES["fundo_alt"]], [1.0, CORES["cinza_escuro"]]],
+        colorscale=DIVERGENTE_CORRELACAO,
         customdata=customdata,
         hovertemplate="%{customdata[0]} × %{customdata[1]}<br>r = %{z:.3f}<br>N = %{customdata[2]}<extra></extra>",
         text=texto,
@@ -206,9 +217,18 @@ with col_disp_badge:
     st.write("")
     badge_confiabilidade(parametro_disp, resumo_cobertura)
 
+mostrar_tudo_disp = st.checkbox(
+    "Mostrar todos os pontos (incluindo outliers)",
+    value=False,
+    key="disp_mostrar_tudo",
+    help="Por padrão, o eixo de cada gráfico é ajustado para destacar a nuvem principal de pontos "
+    "(intervalo interquartil expandido). Ative para voltar ao range completo dos dados.",
+)
+
 outros_parametros = [p for p in todos if p != parametro_disp]
 cols_scatter = st.columns(3)
 n_ocultos = 0
+total_fora_da_vista = 0
 for i, outro in enumerate(outros_parametros):
     dados = df_recorte[[parametro_disp, outro]].dropna()
     if len(dados) < 3:
@@ -220,169 +240,278 @@ for i, outro in enumerate(outros_parametros):
         labels={outro: rotulo(outro), parametro_disp: rotulo(parametro_disp)},
         title=f"{rotulo(parametro_disp)} vs. {rotulo(outro)}  (N={len(dados)}, r={r:.2f})",
     )
-    fig_sc.update_traces(marker=dict(color=CORES["petroleo"], size=6, opacity=0.5), selector=dict(mode="markers"))
+    fig_sc.update_traces(marker=dict(color=CORES["petroleo"], size=6), selector=dict(mode="markers"))
     fig_sc.update_traces(line=dict(color=CORES["linha_tendencia"], width=2), selector=dict(mode="lines"))
-    layout_editorial(fig_sc, height=330, margin=dict(l=10, r=10, t=45, b=10), title_font_size=12)
-    cols_scatter[(i - n_ocultos) % 3].plotly_chart(fig_sc, use_container_width=True)
 
+    n_fora_par = 0
+    if not mostrar_tudo_disp:
+        x_ini, x_fim = limites_iqr_expandido(dados[outro])
+        y_ini, y_fim = limites_iqr_expandido(dados[parametro_disp])
+        fora = dados[
+            (dados[outro] < x_ini) | (dados[outro] > x_fim)
+            | (dados[parametro_disp] < y_ini) | (dados[parametro_disp] > y_fim)
+        ]
+        n_fora_par = len(fora)
+        if n_fora_par:
+            total_fora_da_vista += n_fora_par
+            fig_sc.update_xaxes(range=[x_ini, x_fim])
+            fig_sc.update_yaxes(range=[y_ini, y_fim])
+
+    layout_editorial(fig_sc, height=330, margin=dict(l=10, r=10, t=45, b=10), title_font_size=12)
+    with cols_scatter[(i - n_ocultos) % 3]:
+        st.plotly_chart(fig_sc, use_container_width=True)
+        if n_fora_par:
+            st.caption(f"Eixo ajustado; {n_fora_par} ponto(s) fora do intervalo não visível(is) aqui.")
+
+nota_zoom = ""
+if not mostrar_tudo_disp and total_fora_da_vista:
+    nota_zoom = (
+        f" Eixos ajustados para destacar a relação entre as variáveis (intervalo interquartil expandido); "
+        f"{total_fora_da_vista} ponto(s), somados em todos os gráficos acima, ficam fora do intervalo "
+        "visível e não aparecem nesta visualização — ative \"Mostrar todos os pontos\" para vê-los."
+    )
 legenda_grafico(
     f"{len(outros_parametros) - n_ocultos} de {len(outros_parametros)} pares exibidos "
     f"(N ≥ 3 amostras em comum)." + (f" {n_ocultos} par(es) ocultos por N < 3." if n_ocultos else "")
-    + f" Recorte: {descricao_recorte3}."
+    + f" Recorte: {descricao_recorte3}." + nota_zoom
 )
-
-st.divider()
-
-# ============================================================ regressao ====
-
-secao("03", "Regressão múltipla — o que influencia Turbidez e Vazão")
-st.caption("Esta seção sempre usa a bacia inteira, independente do recorte espacial escolhido acima.")
-
-st.subheader("Coeficientes da regressão múltipla")
-
-coef, met = carregar_regressao()
-alvos_disponiveis = met["ALVO"].unique().tolist()
-
-c_sel1, c_sel2 = st.columns(2)
-alvo_sel = c_sel1.selectbox("Variável alvo", alvos_disponiveis, format_func=rotulo)
-modelos_disponiveis = met.loc[met["ALVO"] == alvo_sel, "MODELO"].tolist()
-modelo_sel = c_sel2.radio(
-    "Modelo",
-    modelos_disponiveis,
-    index=modelos_disponiveis.index("nucleo_robusto") if "nucleo_robusto" in modelos_disponiveis else 0,
-    format_func=lambda m: "Núcleo robusto (recomendado)" if m == "nucleo_robusto" else "Completo (todos ROBUSTO+MODERADO)",
-    horizontal=True,
-)
-
-linha_met = met[(met["ALVO"] == alvo_sel) & (met["MODELO"] == modelo_sel)]
-if linha_met.empty:
-    bloco_interpretativo(
-        f"O modelo '{modelo_sel}' não pôde ser ajustado para {rotulo(alvo_sel)}: a amostra completa é menor "
-        "que o número de preditores (matriz singular). Ver metodologia do script 02."
-    )
-else:
-    m = linha_met.iloc[0]
-    if modelo_sel == "completo" or m["RAZAO_N_PREDITORES"] < 5:
-        bloco_interpretativo(
-            f"N={int(m['N'])} para {int(m['N_PREDITORES'])} preditores (razão N/preditores = "
-            f"{m['RAZAO_N_PREDITORES']:.1f}). Abaixo de ~5, trate este modelo como **exploratório**, não conclusivo."
-        )
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("N", int(m["N"]))
-    c2.metric("R²", f"{m['R2']:.2f}")
-    c3.metric("R² ajustado", f"{m['R2_AJUSTADO']:.2f}")
-    c4.metric("VIF máximo", f"{m['VIF_MAXIMO']:.2f}", help="Variance Inflation Factor — acima de ~5 sugere multicolinearidade relevante.")
-
-    coef_sel = coef[(coef["ALVO"] == alvo_sel) & (coef["MODELO"] == modelo_sel)].copy()
-    coef_sel["Parâmetro"] = coef_sel["VARIAVEL"].apply(rotulo)
-    coef_sel["Significativo"] = coef_sel["P_VALOR"] < 0.05
-
-    tabela_coef = coef_sel[["Parâmetro", "COEFICIENTE", "COEFICIENTE_PADRONIZADO", "P_VALOR", "VIF", "Significativo"]].rename(
-        columns={"COEFICIENTE": "Coeficiente", "COEFICIENTE_PADRONIZADO": "Coef. padronizado (β)", "P_VALOR": "p-valor"}
-    )
-    st.dataframe(
-        tabela_coef.style.format({"Coeficiente": "{:.3f}", "Coef. padronizado (β)": "{:.3f}", "p-valor": "{:.4f}", "VIF": "{:.2f}"}),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    coef_ordenado = coef_sel.sort_values("COEFICIENTE_PADRONIZADO")
-    cores_barras = [CORES["petroleo"] if sig else CORES["texto_mudo"] for sig in coef_ordenado["Significativo"]]
-    fig_bar = go.Figure(
-        go.Bar(
-            x=coef_ordenado["COEFICIENTE_PADRONIZADO"],
-            y=coef_ordenado["Parâmetro"],
-            orientation="h",
-            marker_color=cores_barras,
-            text=[f"p={p:.3f}" for p in coef_ordenado["P_VALOR"]],
-            textposition="outside",
-        )
-    )
-    fig_bar.add_vline(x=0, line_color=CORES["grade"])
-    layout_editorial(
-        fig_bar,
-        title=f"Coeficientes padronizados (β) — {rotulo(alvo_sel)} ~ {modelo_sel}",
-        xaxis_title="β padronizado",
-        height=120 + 45 * len(coef_ordenado),
-        margin=dict(l=10, r=60, t=40, b=10),
-    )
-    st.plotly_chart(fig_bar, use_container_width=True)
-    legenda_grafico(
-        "Barras em petróleo escuro: p < 0,05 (significativo). Barras em cinza: não significativo. "
-        "O β padronizado permite comparar a magnitude do efeito entre parâmetros medidos em unidades diferentes."
-    )
 
 st.divider()
 
 # ======================================================== pca/clustering ====
 
-secao("04", "PCA e Clustering")
-st.caption("Esta seção sempre usa a bacia inteira, independente do recorte espacial escolhido acima.")
+secao("03", "PCA e Clustering")
 
-scores, var, loadings, perfil = carregar_pca(sufixo="_sem_outlier")
-sil = carregar_silhouette(sufixo="_sem_outlier")
-melhor_k = int(sil.loc[sil["SILHOUETTE"].idxmax(), "K"])
-melhor_sil = float(sil["SILHOUETTE"].max())
-n_pca = scores.shape[0]
-var_pc1 = float(var.loc[var["COMPONENTE"] == "PC1", "VARIANCIA_EXPLICADA_PCT"].iloc[0])
-var_pc2 = float(var.loc[var["COMPONENTE"] == "PC2", "VARIANCIA_EXPLICADA_PCT"].iloc[0])
+pca_disponivel = True
+
+if usa_bacia_inteira:
+    st.caption("Bacia inteira: usa o PCA/clustering pré-computado pelo script 03 (exclui o outlier ITA-0220).")
+    scores, var, loadings, perfil = carregar_pca(sufixo="_sem_outlier")
+    sil = carregar_silhouette(sufixo="_sem_outlier")
+    melhor_k = int(sil.loc[sil["SILHOUETTE"].idxmax(), "K"])
+    melhor_sil = float(sil["SILHOUETTE"].max())
+    n_pca = scores.shape[0]
+    var_pc1 = float(var.loc[var["COMPONENTE"] == "PC1", "VARIANCIA_EXPLICADA_PCT"].iloc[0])
+    var_pc2 = float(var.loc[var["COMPONENTE"] == "PC2", "VARIANCIA_EXPLICADA_PCT"].iloc[0])
+    variaveis_pca_ativas = principal
+else:
+    st.caption(
+        f"Recorte: {descricao_recorte3} (N={len(df_recorte)}) — PCA/clustering recalculado ao vivo, restrito "
+        f"aos {len(robusto)} parâmetros ROBUSTO (mesma redução usada na seção 04, Tipologia dos pontos, para "
+        "preservar N com um corpo d'água menor)."
+    )
+    resultado_pca_live = calcular_pca_clustering_live(df_recorte, robusto)
+    if resultado_pca_live is None:
+        pca_disponivel = False
+        n_disp_pca = df_recorte[robusto].dropna().shape[0]
+        bloco_interpretativo(
+            f"**N insuficiente para PCA/clustering neste recorte** (N={n_disp_pca} amostras completas para "
+            f"{len(robusto)} parâmetros ROBUSTO — precisaria exceder o número de variáveis). Use as seções "
+            "01 (Correlação) e 02 (Dispersão) acima como alternativa exploratória."
+        )
+    else:
+        scores = resultado_pca_live["scores"]
+        var = resultado_pca_live["var"]
+        sil = resultado_pca_live["silhouette"]
+        perfil = resultado_pca_live["perfil"]
+        melhor_k = resultado_pca_live["melhor_k"]
+        melhor_sil = float(sil["SILHOUETTE"].max())
+        n_pca = resultado_pca_live["n"]
+        var_pc1 = float(var.loc[var["COMPONENTE"] == "PC1", "VARIANCIA_EXPLICADA_PCT"].iloc[0])
+        var_pc2 = float(var.loc[var["COMPONENTE"] == "PC2", "VARIANCIA_EXPLICADA_PCT"].iloc[0])
+        variaveis_pca_ativas = robusto
+
+if pca_disponivel:
+    if usa_bacia_inteira:
+        bloco_interpretativo(
+            "**Conclusão: não há estrutura de cluster forte nestes dados — e este é um resultado válido, não uma "
+            "lacuna da análise.**\n\n"
+            f"- PCA/clustering usam só os {len(variaveis_pca_ativas)} parâmetros ROBUSTO+MODERADO, em complete-case (sem "
+            f"imputação), o que restringe a análise às **N={n_pca}** amostras com todos os parâmetros preenchidos "
+            "simultaneamente.\n"
+            f"- As duas primeiras componentes explicam apenas **{var_pc1 + var_pc2:.0f}%** da variância total "
+            f"(PC1={var_pc1:.1f}%, PC2={var_pc2:.1f}%) — não há um eixo dominante de variação.\n"
+            f"- O melhor agrupamento testado (k={melhor_k}) tem silhouette = **{melhor_sil:.2f}**; valores abaixo de "
+            "0,25 geralmente indicam ausência de estrutura de cluster real (a referência usual considera > 0,5 "
+            "como estrutura forte).\n"
+            f"- N={n_pca} para {len(variaveis_pca_ativas)} variáveis é pequeno frente à regra prática de N ≥ 5× o número de "
+            f"variáveis (≥ {5 * len(variaveis_pca_ativas)}) — mesmo que houvesse estrutura, esta amostra não teria poder "
+            "estatístico para detectá-la com confiança.\n\n"
+            "Esta execução já exclui a amostra `ITA-0220`, um outlier extremo de condutividade/cloreto que "
+            "dominava sozinho um cluster isolado na primeira tentativa — mesmo removendo-a, nenhuma segmentação "
+            "natural emergiu (ver metodologia do script 03)."
+        )
+    else:
+        razao_pca = n_pca / len(variaveis_pca_ativas)
+        aviso_exploratorio = (
+            f" Razão N/variáveis = {razao_pca:.1f}×, abaixo da referência de ≥5× — tratar como **exploratório**."
+            if razao_pca < 5
+            else f" Razão N/variáveis = {razao_pca:.1f}×."
+        )
+        bloco_interpretativo(
+            f"PCA/clustering restrito aos {len(variaveis_pca_ativas)} parâmetros ROBUSTO. N={n_pca}.{aviso_exploratorio}\n\n"
+            f"Melhor agrupamento (k={melhor_k}) tem silhouette = **{melhor_sil:.2f}**; PC1+PC2 explicam "
+            f"**{var_pc1 + var_pc2:.0f}%** da variância entre as amostras deste recorte."
+        )
+
+    col_bi, col_sil = st.columns([3, 2])
+
+    with col_bi:
+        fig_bi = go.Figure()
+        for i, c in enumerate(sorted(scores["CLUSTER"].unique())):
+            sub = scores[scores["CLUSTER"] == c]
+            fig_bi.add_trace(
+                go.Scatter(
+                    x=sub["PC1"], y=sub["PC2"], mode="markers", name=f"cluster {c} (N={len(sub)})",
+                    marker=dict(color=CORES_CLUSTER[i % len(CORES_CLUSTER)], size=10, line=dict(width=1, color="white")),
+                )
+            )
+        layout_editorial(
+            fig_bi,
+            title=f"PCA biplot — PC1 × PC2 (k={melhor_k}, N={n_pca})",
+            xaxis_title=f"PC1 ({var_pc1:.1f}% da variância)",
+            yaxis_title=f"PC2 ({var_pc2:.1f}% da variância)",
+            height=460,
+            margin=dict(l=10, r=10, t=40, b=10),
+        )
+        st.plotly_chart(fig_bi, use_container_width=True)
+
+    with col_sil:
+        fig_sil = go.Figure(
+            go.Scatter(x=sil["K"], y=sil["SILHOUETTE"], mode="lines+markers", line=dict(color=CORES["petroleo"], width=2), marker=dict(size=9))
+        )
+        fig_sil.add_hline(y=0.25, line_dash="dot", line_color=CORES["texto_mudo"], annotation_text="~sem estrutura real")
+        layout_editorial(
+            fig_sil,
+            title="Silhouette por número de clusters (k)",
+            xaxis_title="k", yaxis_title="Silhouette score",
+            height=460, margin=dict(l=10, r=10, t=40, b=10),
+        )
+        st.plotly_chart(fig_sil, use_container_width=True)
+
+    if usa_bacia_inteira:
+        legenda_grafico(
+            "Cada cor identifica um cluster testado — mas o achado central desta seção é justamente a "
+            "**ausência de separação real** entre eles (silhouette baixo, variância pouco concentrada em PC1/PC2): "
+            "cores distintas aqui marcam grupos formalmente atribuídos pelo algoritmo, não uma segmentação "
+            "biologicamente/quimicamente evidente na nuvem de pontos."
+        )
+    else:
+        legenda_grafico(f"PCA/clustering ao vivo. Recorte: {descricao_recorte3} (N={n_pca}).")
+
+st.divider()
+
+# ============================================= tipologia dos pontos ====
+
+secao("04", "Tipologia dos pontos de coleta")
 
 bloco_interpretativo(
-    "**Conclusão: não há estrutura de cluster forte nestes dados — e este é um resultado válido, não uma "
-    "lacuna da análise.**\n\n"
-    f"- PCA/clustering usam só os {len(principal)} parâmetros ROBUSTO+MODERADO, em complete-case (sem "
-    f"imputação), o que restringe a análise às **N={n_pca}** amostras com todos os parâmetros preenchidos "
-    "simultaneamente.\n"
-    f"- As duas primeiras componentes explicam apenas **{var_pc1 + var_pc2:.0f}%** da variância total "
-    f"(PC1={var_pc1:.1f}%, PC2={var_pc2:.1f}%) — não há um eixo dominante de variação.\n"
-    f"- O melhor agrupamento testado (k={melhor_k}) tem silhouette = **{melhor_sil:.2f}**; valores abaixo de "
-    "0,25 geralmente indicam ausência de estrutura de cluster real (a referência usual considera > 0,5 "
-    "como estrutura forte).\n"
-    f"- N={n_pca} para {len(principal)} variáveis é pequeno frente à regra prática de N ≥ 5× o número de "
-    f"variáveis (≥ {5 * len(principal)}) — mesmo que houvesse estrutura, esta amostra não teria poder "
-    "estatístico para detectá-la com confiança.\n\n"
-    "Esta execução já exclui a amostra `ITA-0220`, um outlier extremo de condutividade/cloreto que "
-    "dominava sozinho um cluster isolado na primeira tentativa — mesmo removendo-a, nenhuma segmentação "
-    "natural emergiu (ver metodologia do script 03)."
+    "Em vez de perguntar se dois parâmetros variam juntos, aqui perguntamos **quais pontos de coleta têm "
+    "um comportamento parecido entre si**, comparando o perfil típico de cada um ao longo de todo o "
+    "período monitorado. Isso pode revelar grupos de pontos com características semelhantes (por exemplo, "
+    "mais turvos ou mais limpos), possivelmente ligados à sua localização na bacia."
 )
 
-col_bi, col_sil = st.columns([3, 2])
+medianas_tip, scores_tip, var_tip, sil_tip, perfil_tip = carregar_tipologia_pontos()
+variaveis_tip = [c for c in perfil_tip.columns if c not in ("CLUSTER", "N_PONTOS")]
+n_pontos_total = medianas_tip.shape[0]
+n_pontos_pca = scores_tip.shape[0]
+melhor_k_tip = int(sil_tip.loc[sil_tip["SILHOUETTE"].idxmax(), "K"])
+melhor_sil_tip = float(sil_tip["SILHOUETTE"].max())
+var_pc1_tip = float(var_tip.loc[var_tip["COMPONENTE"] == "PC1", "VARIANCIA_EXPLICADA_PCT"].iloc[0])
+var_pc2_tip = float(var_tip.loc[var_tip["COMPONENTE"] == "PC2", "VARIANCIA_EXPLICADA_PCT"].iloc[0])
 
-with col_bi:
-    fig_bi = go.Figure()
-    for i, c in enumerate(sorted(scores["CLUSTER"].unique())):
-        sub = scores[scores["CLUSTER"] == c]
-        fig_bi.add_trace(
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Pontos RNQA (total)", n_pontos_total)
+c2.metric("Pontos usados no PCA", n_pontos_pca)
+c3.metric("Clusters (k escolhido)", melhor_k_tip)
+c4.metric("Silhouette", f"{melhor_sil_tip:.2f}")
+
+bloco_interpretativo(
+    f"PCA/clustering usa só os **{len(variaveis_tip)} parâmetros ROBUSTO** (não ROBUSTO+MODERADO): "
+    f"exigindo mediana preenchida nos 14 parâmetros ROBUSTO+MODERADO, a amostra cairia para 20 dos "
+    f"{n_pontos_total} pontos; restrito aos ROBUSTO, {n_pontos_pca} dos {n_pontos_total} ficam "
+    "disponíveis (o único de fora tem apenas 2 amostras válidas em todo o histórico, faltando "
+    f"salinidade). Mesmo assim, N={n_pontos_pca} para {len(variaveis_tip)} variáveis "
+    f"(razão {n_pontos_pca / len(variaveis_tip):.1f}×) fica abaixo da referência de ≥5× — tratar como "
+    "**exploratório**, igual ao PCA/clustering das seções acima."
+)
+
+if melhor_sil_tip >= 0.5:
+    forca_tip = "uma estrutura de cluster **forte**"
+elif melhor_sil_tip >= 0.25:
+    forca_tip = "uma estrutura de cluster **moderada** — nem forte, nem ausente"
+else:
+    forca_tip = "**nenhuma estrutura de cluster relevante** entre os pontos — resultado válido, não uma lacuna da análise"
+
+bloco_interpretativo(
+    f"Os {n_pontos_pca} pontos formam {forca_tip} (k={melhor_k_tip}, silhouette={melhor_sil_tip:.2f}). "
+    f"PC1+PC2 explicam {var_pc1_tip + var_pc2_tip:.0f}% da variância entre pontos."
+)
+
+# perfil textual de cada cluster: parametros mais destoantes da media geral entre clusters
+medias_gerais_tip = perfil_tip[variaveis_tip].mean()
+desvios_tip = perfil_tip[variaveis_tip].std().replace(0, np.nan)
+linhas_resumo_tip = []
+for _, linha in perfil_tip.iterrows():
+    z = (linha[variaveis_tip] - medias_gerais_tip) / desvios_tip
+    destaques = z.dropna().abs().sort_values(ascending=False).head(2).index.tolist()
+    partes = [f"{rotulo(v)} {'acima' if z[v] > 0 else 'abaixo'} da média" for v in destaques]
+    pontos_do_cluster = scores_tip.loc[scores_tip["CLUSTER"] == linha["CLUSTER"], "RNQA"].tolist()
+    linhas_resumo_tip.append(
+        {
+            "Cluster": int(linha["CLUSTER"]),
+            "N pontos": int(linha["N_PONTOS"]),
+            "Perfil (vs. média geral entre clusters)": "; ".join(partes) if partes else "sem diferença marcante",
+            "Pontos": ", ".join(pontos_do_cluster),
+        }
+    )
+st.dataframe(pd.DataFrame(linhas_resumo_tip), use_container_width=True, hide_index=True)
+
+clusters_ordenados_tip = sorted(scores_tip["CLUSTER"].unique())
+mapa_cor_cluster_tip = {c: CORES_CLUSTER[i % len(CORES_CLUSTER)] for i, c in enumerate(clusters_ordenados_tip)}
+
+col_bi_tip, col_mapa_tip = st.columns([3, 2])
+
+with col_bi_tip:
+    fig_tip = go.Figure()
+    for c in clusters_ordenados_tip:
+        sub = scores_tip[scores_tip["CLUSTER"] == c]
+        fig_tip.add_trace(
             go.Scatter(
-                x=sub["PC1"], y=sub["PC2"], mode="markers", name=f"cluster {c} (N={len(sub)})",
-                marker=dict(color=CORES_CLUSTER[i % len(CORES_CLUSTER)], size=10, opacity=0.85, line=dict(width=1, color="white")),
+                x=sub["PC1"], y=sub["PC2"], mode="markers+text", text=sub["RNQA"], textposition="top center",
+                textfont=dict(size=8), name=f"cluster {c} (N={len(sub)})",
+                marker=dict(color=mapa_cor_cluster_tip[c], size=11, line=dict(width=1, color="white")),
             )
         )
     layout_editorial(
-        fig_bi,
-        title=f"PCA biplot — PC1 × PC2 (k={melhor_k}, N={n_pca})",
-        xaxis_title=f"PC1 ({var_pc1:.1f}% da variância)",
-        yaxis_title=f"PC2 ({var_pc2:.1f}% da variância)",
-        height=460,
+        fig_tip,
+        title=f"Tipologia dos pontos — PCA biplot (k={melhor_k_tip}, N={n_pontos_pca} pontos)",
+        xaxis_title=f"PC1 ({var_pc1_tip:.1f}% da variância)",
+        yaxis_title=f"PC2 ({var_pc2_tip:.1f}% da variância)",
+        height=480,
         margin=dict(l=10, r=10, t=40, b=10),
     )
-    st.plotly_chart(fig_bi, use_container_width=True)
+    st.plotly_chart(fig_tip, use_container_width=True)
 
-with col_sil:
-    fig_sil = go.Figure(
-        go.Scatter(x=sil["K"], y=sil["SILHOUETTE"], mode="lines+markers", line=dict(color=CORES["petroleo"], width=2), marker=dict(size=9))
+with col_mapa_tip:
+    st.markdown("**Mapa — pontos coloridos por cluster**")
+    cores_por_rnqa_tip = {row["RNQA"]: mapa_cor_cluster_tip[row["CLUSTER"]] for _, row in scores_tip.iterrows()}
+    pontos_mapa_tip = medianas_tip.merge(scores_tip[["RNQA", "CLUSTER"]], on="RNQA", how="left")
+    pontos_mapa_tip["CLUSTER"] = pontos_mapa_tip["CLUSTER"].astype("Int64")
+    mapa_tip = construir_mapa_pontos(
+        pontos_mapa_tip,
+        cor_por_rnqa=cores_por_rnqa_tip,
+        cor_padrao=CORES["texto_mudo"],
+        campos_popup=[("Cluster", "CLUSTER"), ("N amostras (histórico)", "N_AMOSTRAS")],
     )
-    fig_sil.add_hline(y=0.25, line_dash="dot", line_color=CORES["texto_mudo"], annotation_text="~sem estrutura real")
-    layout_editorial(
-        fig_sil,
-        title="Silhouette por número de clusters (k)",
-        xaxis_title="k", yaxis_title="Silhouette score",
-        height=460, margin=dict(l=10, r=10, t=40, b=10),
-    )
-    st.plotly_chart(fig_sil, use_container_width=True)
+    st_folium(mapa_tip, width=None, height=480, returned_objects=[])
+    n_sem_cluster_tip = int(pontos_mapa_tip["CLUSTER"].isna().sum())
+    if n_sem_cluster_tip:
+        st.caption(f"{n_sem_cluster_tip} ponto(s) em cinza: dado insuficiente para entrar no PCA/clustering.")
 
 legenda_grafico(
-    "O biplot usa tons de cinza/verde-petróleo (não uma paleta colorida) porque o próprio achado é a "
-    "ausência de separação — uma paleta vibrante sugeriria uma segmentação mais forte do que a que existe."
+    "Rótulos no biplot são o código RNQA de cada ponto — a mesma cor identifica o mesmo cluster no "
+    "biplot e no mapa. Padrão espacial: veja se os clusters formam agrupamentos geográficos (por trecho "
+    "do rio/corpo d'água) ou se ficam dispersos pela bacia."
 )

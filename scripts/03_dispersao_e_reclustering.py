@@ -46,8 +46,9 @@ plt.rcParams["font.family"] = ["Segoe UI", "Arial", "DejaVu Sans"]  # DejaVu San
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
+from config.estilo import CORES, CORES_SEQUENCIA  # noqa: E402
 from config.nomes_unidades import rotulo  # noqa: E402
-from _lib_analise import bloco_pca_clustering  # noqa: E402
+from _lib_analise import aplicar_fundo_branco, bloco_pca_clustering  # noqa: E402
 
 OUTPUT_DIR = BASE_DIR / "output"
 FIG_DIR = OUTPUT_DIR / "figuras"
@@ -88,14 +89,15 @@ def scatter_turbidez_vs_preditores(df):
         r = dados[preditor].corr(dados["TURBIDEZ"])
 
         fig, ax = plt.subplots(figsize=(7.5, 5.5))
+        aplicar_fundo_branco(fig, ax)
         sns.regplot(
             data=dados, x=preditor, y="TURBIDEZ", ax=ax, ci=None,
-            scatter_kws={"alpha": 0.5, "s": 30, "color": "#4C72B0"},
-            line_kws={"color": "crimson", "label": "ajuste linear"},
+            scatter_kws={"alpha": 0.5, "s": 30, "color": CORES["petroleo"]},
+            line_kws={"color": CORES["linha_tendencia"], "label": "ajuste linear"},
         )
         sns.regplot(
             data=dados, x=preditor, y="TURBIDEZ", ax=ax, scatter=False, lowess=True, ci=None,
-            line_kws={"color": "#2E8B57", "linestyle": "--", "label": "lowess (nao-linear)"},
+            line_kws={"color": CORES_SEQUENCIA[2], "linestyle": "--", "label": "lowess (nao-linear)"},
         )
         ax.set_xlabel(rotulo(preditor))
         ax.set_ylabel(rotulo_turbidez)
@@ -117,14 +119,15 @@ def scatter_pares_correlacao(df, baixo):
         r = dados[a].corr(dados[b])
 
         fig, ax = plt.subplots(figsize=(7.5, 5.5))
-        cor = "crimson" if e_baixo else "#4C72B0"
+        aplicar_fundo_branco(fig, ax)
+        cor = CORES["pouco"] if e_baixo else CORES["petroleo"]
         ax.scatter(dados[a], dados[b], alpha=0.6, color=cor, s=35)
         ax.set_xlabel(rotulo(a))
         ax.set_ylabel(rotulo(b))
         titulo = f"{rotulo(a)} vs. {rotulo(b)}  (N={len(dados)}, r={r:.3f})"
         if e_baixo:
             titulo += "\nN baixo -- correlacao pode ser espuria, nao usar para conclusoes fortes"
-        ax.set_title(titulo, color=("crimson" if e_baixo else "black"))
+        ax.set_title(titulo, color=(CORES["pouco"] if e_baixo else CORES["texto_primario"]))
         fig.tight_layout()
         fig.savefig(DISP_DIR / f"correlacao_{a}_vs_{b}.png", dpi=150, bbox_inches="tight")
         plt.close(fig)
@@ -140,9 +143,10 @@ def scatter_tendencia_temporal(df):
         jitter = rng.uniform(-0.15, 0.15, size=len(dados))
 
         fig, ax = plt.subplots(figsize=(8.5, 5))
-        ax.scatter(dados["ANO"] + jitter, dados[param], alpha=0.45, color="#4C72B0", s=28, label="amostras")
+        aplicar_fundo_branco(fig, ax)
+        ax.scatter(dados["ANO"] + jitter, dados[param], alpha=0.45, color=CORES["petroleo"], s=28, label="amostras")
         medias = dados.groupby("ANO")[param].mean()
-        ax.plot(medias.index, medias.values, color="crimson", marker="o", linewidth=2, label="media anual")
+        ax.plot(medias.index, medias.values, color=CORES["linha_tendencia"], marker="o", linewidth=2, label="media anual")
         ax.set_xlabel("Ano")
         ax.set_ylabel(rotulo(param))
         ax.set_title(f"{rotulo(param)} ao longo do tempo (N={len(dados)})")

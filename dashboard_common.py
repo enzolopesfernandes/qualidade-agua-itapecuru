@@ -12,8 +12,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import folium
+import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
+from scipy.stats import gaussian_kde
 
 BASE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE_DIR))
@@ -197,18 +201,50 @@ def legenda_grafico(texto: str) -> None:
 
 
 def layout_editorial(fig, **kwargs):
-    """Aplica o layout minimalista do dashboard (fundo creme, eixos e
-    gridlines finas) a uma figura plotly, in-place -- reusar em todo grafico
-    plotly do dashboard para manter a mesma linguagem visual. kwargs extras
-    sao passados direto para fig.update_layout()."""
+    """Aplica o layout minimalista do dashboard a uma figura plotly, in-place
+    -- reusar em todo grafico plotly do dashboard para manter a mesma
+    linguagem visual. O fundo do PLOT (plot_bgcolor e paper_bgcolor) e sempre
+    branco puro, mesmo com a pagina em creme ao redor -- o grafico deve
+    contrastar com a pagina, nao se misturar nela. kwargs extras sao passados
+    direto para fig.update_layout()."""
     fig.update_layout(
-        plot_bgcolor=CORES["fundo"],
-        paper_bgcolor=CORES["fundo"],
+        plot_bgcolor=CORES["fundo_grafico"],
+        paper_bgcolor=CORES["fundo_grafico"],
         font_color=CORES["texto_primario"],
         **kwargs,
     )
-    fig.update_xaxes(gridcolor=CORES["grade"], zeroline=False, linecolor=CORES["grade"])
-    fig.update_yaxes(gridcolor=CORES["grade"], zeroline=False, linecolor=CORES["grade"])
+    fig.update_xaxes(gridcolor=CORES["grade_grafico"], zeroline=False, linecolor=CORES["grade_grafico"])
+    fig.update_yaxes(gridcolor=CORES["grade_grafico"], zeroline=False, linecolor=CORES["grade_grafico"])
+    return fig
+
+
+@st.cache_data
+def figura_histograma_interativo(serie: pd.Series, rotulo_eixo: str | None = None, cor: str | None = None) -> go.Figure:
+    """Histograma (Plotly) com zoom/pan nativos, para a pagina 2 -- substitui a
+    versao matplotlib estatica (figura_histograma() em scripts/_lib_analise.py)
+    para que o usuario possa arrastar/dar zoom, algo que uma imagem PNG nunca
+    permite. Overlay de densidade (KDE), escalado para a mesma escala de
+    contagem do histograma, preserva a leitura de distribuicao que a versao
+    anterior (seaborn kde=True) oferecia."""
+    cor = cor or CORES["petroleo"]
+    n = len(serie)
+    n_bins = min(40, max(10, int(np.sqrt(n) * 2)))
+    contagens, bordas = np.histogram(serie, bins=n_bins)
+    centros = (bordas[:-1] + bordas[1:]) / 2
+    largura_bin = bordas[1] - bordas[0]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=centros, y=contagens, width=largura_bin * 0.95, marker_color=cor, name="Contagem"))
+
+    if n >= 5 and serie.std() > 1e-9:
+        kde = gaussian_kde(serie)
+        xs = np.linspace(serie.min(), serie.max(), 200)
+        ys = kde(xs) * n * largura_bin
+        fig.add_trace(
+            go.Scatter(x=xs, y=ys, mode="lines", line=dict(color=CORES["linha_tendencia"], width=2), name="densidade (KDE)")
+        )
+
+    fig.update_layout(xaxis_title=rotulo_eixo or "", yaxis_title="Contagem", bargap=0.02, showlegend=n >= 5)
     return fig
 
 
@@ -240,13 +276,6 @@ def carregar_correlacao() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 @st.cache_data
-def carregar_regressao() -> tuple[pd.DataFrame, pd.DataFrame]:
-    coef = pd.read_csv(OUTPUT_DIR / "regressao_coeficientes.csv")
-    met = pd.read_csv(OUTPUT_DIR / "regressao_metricas.csv")
-    return coef, met
-
-
-@st.cache_data
 def carregar_pca(sufixo: str = "") -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     scores = pd.read_csv(OUTPUT_DIR / f"pca_scores{sufixo}.csv")
     var = pd.read_csv(OUTPUT_DIR / f"pca_variancia_explicada{sufixo}.csv")
@@ -269,15 +298,29 @@ def carregar_grupos_robusto_moderado_baixo() -> tuple[list[str], list[str], list
     return robusto, moderado, baixo
 
 
+@st.cache_data
+def carregar_tipologia_pontos() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """CSVs gerados por scripts/04_tipologia_pontos_rnqa.py -- PCA/clustering
+    onde a unidade de analise e o PONTO RNQA (mediana de cada parametro ao
+    longo de todo o periodo monitorado), nao a amostra individual. Ver
+    docstring do script para a justificativa metodologica completa.
+    Retorna (medianas_por_ponto, scores, variancia, silhouette, perfil_clusters)."""
+    medianas = pd.read_csv(OUTPUT_DIR / "tipologia_pontos_medianas.csv")
+    scores = pd.read_csv(OUTPUT_DIR / "tipologia_pontos_scores.csv")
+    var = pd.read_csv(OUTPUT_DIR / "tipologia_pontos_pca_variancia.csv")
+    sil = pd.read_csv(OUTPUT_DIR / "tipologia_pontos_silhouette.csv")
+    perfil = pd.read_csv(OUTPUT_DIR / "tipologia_pontos_perfil_clusters.csv")
+    return medianas, scores, var, sil, perfil
+
+
 # --------------------------------------------------------- eixo de periodo ----
 
 def tabela_periodos(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Uma linha por PERIODO (registros sem periodo -- 22 amostras de 2017
-    anteriores a numeracao existir -- ficam de fora: nenhum grafico temporal
-    do dashboard mostra um grupo "sem periodo"), com o ano predominante (ou
-    faixa de anos, quando o periodo cai em mais de um ano-calendario) e
-    ordenada cronologicamente.
+    Uma linha por PERIODO (registros sem periodo preenchido, se houver algum,
+    ficam de fora -- nenhum grafico temporal do dashboard mostra um grupo
+    "sem periodo"), com o ano predominante (ou faixa de anos, quando o
+    periodo cai em mais de um ano-calendario) e ordenada cronologicamente.
 
     PERIODO nao e uma unidade de calendario (um mesmo periodo pode cair em
     dois anos-calendario, ex. periodo 6 = 2020-2021), mas e um eixo
@@ -314,6 +357,19 @@ def agrupar_por_periodo(df: pd.DataFrame, tabela: pd.DataFrame, colunas: list[st
     return agregado
 
 
+# ------------------------------------------------- zoom ajustado em scatters ----
+
+def limites_iqr_expandido(serie: pd.Series) -> tuple[float, float]:
+    """Q1 − 1,5×IQR a Q3 + 1,5×IQR de uma serie -- o mesmo criterio de outlier
+    usado em todo o dashboard (ver pagina 2). Usado como range de eixo em
+    scatters de relacao (correlacao/regressao) para o "zoom ajustado": destaca
+    a nuvem principal de pontos sem descartar dado nenhum -- so a vista muda,
+    nunca o calculo (trendline, r, N sempre usam os dados completos)."""
+    q1, q3 = serie.quantile(0.25), serie.quantile(0.75)
+    iqr = q3 - q1
+    return float(q1 - 1.5 * iqr), float(q3 + 1.5 * iqr)
+
+
 # ----------------------------------------------------- badge de confianca ----
 
 def categoria_parametro(param: str, resumo: pd.DataFrame | None = None) -> str:
@@ -348,3 +404,71 @@ def badge_confiabilidade(param: str, resumo: pd.DataFrame | None = None) -> None
     o significado da cor consistente em todo o dashboard.
     """
     badge_categoria(categoria_parametro(param, resumo))
+
+
+# ------------------------------------------------------------------ mapa ----
+
+def construir_mapa_pontos(
+    pontos: pd.DataFrame,
+    cor_por_rnqa: dict[str, str] | None = None,
+    cor_padrao: str | None = None,
+    campos_popup: list[tuple[str, str]] | None = None,
+) -> folium.Map:
+    """
+    Mapa Folium dos pontos RNQA -- um marcador por ponto, na media das
+    coordenadas registradas nele. `pontos` precisa ter as colunas RNQA,
+    LATITUDE, LONGITUDE (CORPODAGUA e MUNICIPIO sao usadas se presentes).
+
+    Reutilizada pela pagina 1 (cor unica, popup com os parametros ROBUSTO
+    mais recentes) e pela secao de tipologia de pontos da pagina 3 (cor por
+    cluster, popup com o cluster) -- para nao duplicar a logica de desenhar
+    o mapa em dois lugares.
+
+    campos_popup: lista de (rotulo, coluna) exibidos no popup, na ordem
+    dada. Valores ausentes viram "sem dado válido"; datas sao formatadas
+    dd/mm/aaaa; floats com 2 casas decimais.
+    """
+    cor_padrao = cor_padrao or CORES["petroleo"]
+    com_coord = pontos.dropna(subset=["LATITUDE", "LONGITUDE"])
+    centro = [com_coord["LATITUDE"].mean(), com_coord["LONGITUDE"].mean()]
+    mapa = folium.Map(location=centro, zoom_start=9, tiles="CartoDB positron")
+
+    for _, linha in com_coord.iterrows():
+        rnqa = linha["RNQA"]
+        cor = (cor_por_rnqa or {}).get(rnqa, cor_padrao)
+
+        partes = []
+        for rotulo_campo, coluna in campos_popup or []:
+            v = linha.get(coluna)
+            if pd.isna(v):
+                valor_txt = "sem dado válido"
+            elif isinstance(v, pd.Timestamp):
+                valor_txt = v.strftime("%d/%m/%Y")
+            elif isinstance(v, float):
+                valor_txt = f"{v:.2f}"
+            else:
+                valor_txt = str(v)
+            partes.append(f"<b>{rotulo_campo}:</b> {valor_txt}")
+
+        popup_html = f"""
+        <div style="font-family: system-ui, sans-serif; font-size: 0.85rem; min-width: 230px;">
+          <b style="font-size:0.95rem;">{rnqa}</b><br>
+          {linha.get('CORPODAGUA', 'N/D')} — {linha.get('MUNICIPIO', 'N/D')}
+          <hr style="margin:6px 0; border-color:{CORES['grade']};">
+          {'<br>'.join(partes)}
+        </div>
+        """
+
+        folium.CircleMarker(
+            location=[linha["LATITUDE"], linha["LONGITUDE"]],
+            radius=7,
+            color=CORES["petroleo_escuro"],
+            weight=1.5,
+            fill=True,
+            fill_color=cor,
+            fill_opacity=0.8,
+            popup=folium.Popup(popup_html, max_width=300),
+            tooltip=rnqa,
+        ).add_to(mapa)
+
+    return mapa

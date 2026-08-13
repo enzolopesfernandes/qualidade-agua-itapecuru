@@ -22,7 +22,6 @@ from dashboard_common import (  # noqa: E402
 st.set_page_config(page_title=TITULO_TRABALHO, page_icon=ICONE_PAGINA, layout="wide")
 render_header("Início")
 
-st.markdown('<p class="kicker">TCC / Artigo Acadêmico</p>', unsafe_allow_html=True)
 render_titulo_trabalho("h1")
 
 st.markdown(

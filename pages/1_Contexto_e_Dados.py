@@ -11,7 +11,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import folium
 import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
@@ -29,6 +28,7 @@ from dashboard_common import (  # noqa: E402
     bloco_interpretativo,
     carregar_dados,
     carregar_resumo_cobertura,
+    construir_mapa_pontos,
     render_header,
     secao,
 )
@@ -120,50 +120,13 @@ def preparar_dados_mapa(_df: pd.DataFrame) -> pd.DataFrame:
     return coords.join(resumo_recente, how="left").reset_index()
 
 
-def construir_mapa(pontos: pd.DataFrame) -> folium.Map:
-    com_coord = pontos.dropna(subset=["LATITUDE", "LONGITUDE"])
-    centro = [com_coord["LATITUDE"].mean(), com_coord["LONGITUDE"].mean()]
-    mapa = folium.Map(location=centro, zoom_start=9, tiles="CartoDB positron")
-
-    for _, linha in com_coord.iterrows():
-        partes_param = []
-        for p in PARAMS_ROBUSTOS_PRIORITARIOS:
-            v = linha.get(p)
-            valor_txt = f"{v:.2f}" if pd.notna(v) else "sem dado válido"
-            partes_param.append(f"<b>{rotulo(p)}:</b> {valor_txt}")
-
-        data_coleta = linha.get("DATA_COLETA")
-        data_txt = data_coleta.strftime("%d/%m/%Y") if pd.notna(data_coleta) else "sem coleta válida registrada"
-
-        popup_html = f"""
-        <div style="font-family: system-ui, sans-serif; font-size: 0.85rem; min-width: 230px;">
-          <b style="font-size:0.95rem;">{linha['RNQA']}</b><br>
-          {linha.get('CORPODAGUA', 'N/D')} — {linha.get('MUNICIPIO', 'N/D')}<br>
-          <span style="color:{CORES['texto_mudo']};">última coleta válida: {data_txt}</span>
-          <hr style="margin:6px 0; border-color:{CORES['grade']};">
-          {'<br>'.join(partes_param)}
-        </div>
-        """
-
-        folium.CircleMarker(
-            location=[linha["LATITUDE"], linha["LONGITUDE"]],
-            radius=7,
-            color=CORES["petroleo_escuro"],
-            weight=1.5,
-            fill=True,
-            fill_color=CORES["petroleo"],
-            fill_opacity=0.8,
-            popup=folium.Popup(popup_html, max_width=300),
-            tooltip=linha["RNQA"],
-        ).add_to(mapa)
-
-    return mapa
-
-
 pontos_mapa = preparar_dados_mapa(df)
 sem_coordenadas = pontos_mapa[pontos_mapa["LATITUDE"].isna() | pontos_mapa["LONGITUDE"].isna()]
 
-mapa = construir_mapa(pontos_mapa)
+mapa = construir_mapa_pontos(
+    pontos_mapa,
+    campos_popup=[("última coleta válida", "DATA_COLETA")] + [(rotulo(p), p) for p in PARAMS_ROBUSTOS_PRIORITARIOS],
+)
 st_folium(mapa, width=None, height=560, returned_objects=[])
 
 if len(sem_coordenadas) > 0:
