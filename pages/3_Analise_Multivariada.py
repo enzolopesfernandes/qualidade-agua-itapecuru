@@ -354,40 +354,24 @@ if pca_disponivel:
             f"**{var_pc1 + var_pc2:.0f}%** da variância entre as amostras deste recorte."
         )
 
-    col_bi, col_sil = st.columns([3, 2])
-
-    with col_bi:
-        fig_bi = go.Figure()
-        for i, c in enumerate(sorted(scores["CLUSTER"].unique())):
-            sub = scores[scores["CLUSTER"] == c]
-            fig_bi.add_trace(
-                go.Scatter(
-                    x=sub["PC1"], y=sub["PC2"], mode="markers", name=f"cluster {c} (N={len(sub)})",
-                    marker=dict(color=CORES_CLUSTER[i % len(CORES_CLUSTER)], size=10, line=dict(width=1, color="white")),
-                )
+    fig_bi = go.Figure()
+    for i, c in enumerate(sorted(scores["CLUSTER"].unique())):
+        sub = scores[scores["CLUSTER"] == c]
+        fig_bi.add_trace(
+            go.Scatter(
+                x=sub["PC1"], y=sub["PC2"], mode="markers", name=f"cluster {c} (N={len(sub)})",
+                marker=dict(color=CORES_CLUSTER[i % len(CORES_CLUSTER)], size=10, line=dict(width=1, color="white")),
             )
-        layout_editorial(
-            fig_bi,
-            title=f"PCA biplot — PC1 × PC2 (k={melhor_k}, N={n_pca})",
-            xaxis_title=f"PC1 ({var_pc1:.1f}% da variância)",
-            yaxis_title=f"PC2 ({var_pc2:.1f}% da variância)",
-            height=460,
-            margin=dict(l=10, r=10, t=40, b=10),
         )
-        st.plotly_chart(fig_bi, use_container_width=True)
-
-    with col_sil:
-        fig_sil = go.Figure(
-            go.Scatter(x=sil["K"], y=sil["SILHOUETTE"], mode="lines+markers", line=dict(color=CORES["petroleo"], width=2), marker=dict(size=9))
-        )
-        fig_sil.add_hline(y=0.25, line_dash="dot", line_color=CORES["texto_mudo"], annotation_text="~sem estrutura real")
-        layout_editorial(
-            fig_sil,
-            title="Silhouette por número de clusters (k)",
-            xaxis_title="k", yaxis_title="Silhouette score",
-            height=460, margin=dict(l=10, r=10, t=40, b=10),
-        )
-        st.plotly_chart(fig_sil, use_container_width=True)
+    layout_editorial(
+        fig_bi,
+        title=f"PCA biplot — PC1 × PC2 (k={melhor_k}, N={n_pca})",
+        xaxis_title=f"PC1 ({var_pc1:.1f}% da variância)",
+        yaxis_title=f"PC2 ({var_pc2:.1f}% da variância)",
+        height=460,
+        margin=dict(l=10, r=10, t=40, b=10),
+    )
+    st.plotly_chart(fig_bi, use_container_width=True)
 
     if usa_bacia_inteira:
         legenda_grafico(

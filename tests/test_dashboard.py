@@ -140,6 +140,7 @@ for caminho in PAGINAS:
             "quais pontos de coleta têm um comportamento parecido" in texto,
         )
         checar("Metrica de N de pontos usados no PCA presente", any("Pontos usados no PCA" in (m.label or "") for m in at.metric))
+        checar("Grafico de silhouette por k REMOVIDO da secao PCA/Clustering", "Silhouette por número de clusters" not in texto)
 
         # segmentacao por corpo d'agua: N insuficiente (RIO ALPERCATAS, N=1) bloqueia PCA
         at.selectbox(key="nivel_recorte_multivariada").set_value("Corpo d'água").run(timeout=60)
@@ -169,7 +170,8 @@ for caminho in PAGINAS:
         checar("Legenda de grafico NAO mostra contagem de pontos tipo '(22/27)'", "pts (" not in texto and "pontos RNQA foram visitados" not in texto)
         checar("Nao menciona 'campanha' em nenhum lugar da pagina", "campanha" not in texto.lower())
         checar("Menciona 'rodada de monitoramento' (eixo PERIODO, nao ANO)", "rodada de monitoramento" in texto.lower())
-        checar("Secao de corpos d'agua ao longo das rodadas presente", "RIO ITAPECURU" in texto)
+        checar("Secao de corpos d'agua ao longo dos periodos presente", "RIO ITAPECURU" in texto)
+        checar("Secao 03 usa 'períodos' (nao mais 'rodadas') no titulo", "ao longo dos períodos" in texto)
 
     if caminho == "pages/5a_Galeria_Bacia_Toda.py":
         checar("Secao 'Relações esperadas pela literatura' presente", "Relações esperadas pela literatura" in texto)

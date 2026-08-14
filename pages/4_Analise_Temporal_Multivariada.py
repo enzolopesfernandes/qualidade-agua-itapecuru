@@ -297,10 +297,10 @@ legenda_grafico(
 
 st.divider()
 
-# ==================================== 03 · corpos d'agua ao longo das rodadas ====
+# ==================================== 03 · corpos d'agua ao longo dos periodos ====
 
-secao("03", "Comparação entre corpos d'água ao longo das rodadas")
-st.caption("Eixo X em PERIODO (rodada de monitoramento) — ver bloco explicativo no topo da página para a justificativa.")
+secao("03", "Comparação entre corpos d'água ao longo dos períodos")
+st.caption("Eixo X em PERIODO — ver bloco explicativo no topo da página para a justificativa.")
 
 param_corpos = st.selectbox(
     "Parâmetro (cobertura Robusta)", robusto, format_func=rotulo, key="param_corpos_tempo"
@@ -328,14 +328,14 @@ layout_editorial(
     fig_corpos,
     height=460,
     margin=dict(l=10, r=10, t=20, b=10),
-    xaxis_title="Rodada de monitoramento (PERIODO)",
+    xaxis_title="Período",
     yaxis_title=rotulo(param_corpos),
 )
 fig_corpos.update_xaxes(type="category", categoryorder="array", categoryarray=ORDEM_EIXO)
 st.plotly_chart(fig_corpos, use_container_width=True)
 legenda_grafico(
     f"RIO ITAPECURU (linha mais grossa) concentra {contagem_corpo_total.get('RIO ITAPECURU', 0)} das "
-    f"{len(df_valido)} amostras válidas; os demais corpos d'água têm poucas observações por rodada e "
-    "suas linhas são menos confiáveis. Lacunas na linha = rodada sem amostra válida daquele corpo "
+    f"{len(df_valido)} amostras válidas; os demais corpos d'água têm poucas observações por período e "
+    "suas linhas são menos confiáveis. Lacunas na linha = período sem amostra válida daquele corpo "
     "d'água, não zero."
 )
