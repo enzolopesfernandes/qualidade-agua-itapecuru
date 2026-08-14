@@ -60,8 +60,16 @@ h1, h2, h3, h4, h5, h6, .fonte-serifada {
 
 /* menu "..." padrao do Streamlit da acesso a troca de tema (claro/escuro) --
    escondido para manter o dashboard sempre no modo claro definido em
-   .streamlit/config.toml, sem alternancia visivel ao usuario */
-[data-testid="stToolbar"] { display: none; }
+   .streamlit/config.toml, sem alternancia visivel ao usuario.
+   IMPORTANTE: usa visibility (nao display:none) -- o botao de reabrir a
+   sidebar quando colapsada (stSidebarCollapsedControl) calcula sua posicao
+   vertical (chevronDownshift) a partir da altura desta toolbar; com
+   display:none essa altura zera, o que no Streamlit Community Cloud (onde a
+   toolbar tambem hospeda icones extras da plataforma) empurra o botao para
+   um lugar que nao responde a clique -- sidebar fica impossivel de reabrir
+   depois de fechada. visibility:hidden mantem o espaco no layout sem exibir
+   nada, entao o calculo de posicao continua correto. */
+[data-testid="stToolbar"] { visibility: hidden; pointer-events: none; }
 
 /* barra decorativa padrao do Streamlit (gradiente vermelho/amarelo fixo,
    nao respeita o tema) -- removida por conflitar com "sem gradientes ou
