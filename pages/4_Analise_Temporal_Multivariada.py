@@ -65,9 +65,10 @@ tab_periodos = tabela_periodos(df_valido)
 ORDEM_EIXO = tab_periodos["ROTULO_CURTO"].tolist()
 
 bloco_interpretativo(
-    "Os visuais desta página usam apenas parâmetros de cobertura **Robusta** — a amostra dos "
+    "A maior parte dos visuais desta página usa parâmetros de cobertura **Robusta** — a amostra dos "
     "parâmetros de cobertura Pouca é insuficiente para análises temporais cruzadas com confiança "
-    "(exceção sinalizada na seção 02, abaixo)."
+    "(exceção sinalizada na seção 02, abaixo). A seção 01 também permite alguns parâmetros de cobertura "
+    "**Moderada**, sinalizando quando um deles não tem dado suficiente no recorte espacial escolhido."
 )
 bloco_interpretativo(
     "**Por que o eixo aqui é PERIODO, não ANO:** PERIODO não é uma unidade de calendário (um mesmo "
@@ -127,13 +128,16 @@ else:
 n_periodos_recorte = df_temporal["PERIODO"].nunique(dropna=False)
 st.caption(f"Recorte atual: **{descricao_recorte}** — N = {len(df_temporal)} amostras válidas, {n_periodos_recorte} rodada(s) distinta(s).")
 
+PARAMS_MODERADO_TEMPORAL = ["ALCALINIDADE", "SOLIDOS_DISSOLVIDOS", "TRANSPARENCIA_AGUA", "SOLIDOS_SUSPENSOS", "CLORETO_TOTAL", "NITRATO"]
+opcoes_params_temporal = robusto + [p for p in PARAMS_MODERADO_TEMPORAL if p in moderado]
+
 _default_series = [p for p in ["TURBIDEZ", "OXIGENIO_DISSOLVIDO", "TEMPERATURA_AGUA", "PH", "COND_ELETRICA_ESPECIFICA"] if p in robusto][:5]
 params_sel = st.multiselect(
-    "Parâmetros (2 a 5, cobertura Robusta)",
-    robusto,
+    "Parâmetros (2 ou mais — todos os Robusto + Alcalinidade, Sólidos Dissolvidos, Transparência da "
+    "Água, Sólidos Suspensos, Cloreto Total e Nitrato, de cobertura Moderada)",
+    opcoes_params_temporal,
     default=_default_series,
     format_func=rotulo,
-    max_selections=5,
     placeholder=PLACEHOLDER,
 )
 
@@ -147,35 +151,52 @@ elif n_periodos_recorte < 2:
     )
 else:
     media_periodo = agrupar_por_periodo(df_temporal, tab_periodos, params_sel)
-    padronizado = (media_periodo - media_periodo.mean()) / media_periodo.std()
 
-    fig_multi = go.Figure()
-    for i, p in enumerate(params_sel):
-        fig_multi.add_trace(
-            go.Scatter(
-                x=padronizado.index,
-                y=padronizado[p],
-                mode="lines+markers",
-                name=rotulo(p),
-                line=dict(color=CORES_SEQUENCIA[i % len(CORES_SEQUENCIA)], width=2.4),
-                marker=dict(size=7),
-            )
+    cobertura_valida = media_periodo.notna().sum()
+    params_insuficientes = [p for p in params_sel if cobertura_valida[p] < 2]
+    params_plotaveis = [p for p in params_sel if p not in params_insuficientes]
+
+    if params_insuficientes:
+        detalhes = "; ".join(f"{rotulo(p)} (dado em {int(cobertura_valida[p])} período(s))" for p in params_insuficientes)
+        bloco_interpretativo(
+            f"**{len(params_insuficientes)} parâmetro(s) excluído(s) deste gráfico por falta de dado no recorte "
+            f"{descricao_recorte}:** {detalhes}. Parâmetros de cobertura Moderada, em especial, nem sempre têm "
+            "amostra em todo corpo d'água/ponto de coleta — mude o recorte espacial acima, ou volte para "
+            "\"Toda a bacia\", para incluí-los."
         )
-    layout_editorial(
-        fig_multi,
-        height=460,
-        margin=dict(l=10, r=10, t=20, b=10),
-        xaxis_title="Rodada de monitoramento (PERIODO)",
-        yaxis_title="Valor padronizado (z-score)",
-        legend_title_text="Parâmetro (padronizado)",
-    )
-    fig_multi.update_xaxes(type="category", categoryorder="array", categoryarray=ORDEM_EIXO)
-    st.plotly_chart(fig_multi, use_container_width=True)
-    legenda_grafico(
-        "Média por rodada de monitoramento, padronizada (z-score) — útil para comparar tendências entre "
-        f"parâmetros de escalas diferentes, não para ler a magnitude original. Recorte: {descricao_recorte} "
-        f"(N={len(df_temporal)})."
-    )
+
+    if len(params_plotaveis) < 2:
+        bloco_interpretativo("Menos de 2 parâmetros com dado suficiente neste recorte para padronizar (z-score) e comparar.")
+    else:
+        padronizado = (media_periodo[params_plotaveis] - media_periodo[params_plotaveis].mean()) / media_periodo[params_plotaveis].std()
+
+        fig_multi = go.Figure()
+        for i, p in enumerate(params_plotaveis):
+            fig_multi.add_trace(
+                go.Scatter(
+                    x=padronizado.index,
+                    y=padronizado[p],
+                    mode="lines+markers",
+                    name=rotulo(p),
+                    line=dict(color=CORES_SEQUENCIA[i % len(CORES_SEQUENCIA)], width=2.4),
+                    marker=dict(size=7),
+                )
+            )
+        layout_editorial(
+            fig_multi,
+            height=460,
+            margin=dict(l=10, r=10, t=20, b=10),
+            xaxis_title="Rodada de monitoramento (PERIODO)",
+            yaxis_title="Valor padronizado (z-score)",
+            legend_title_text="Parâmetro (padronizado)",
+        )
+        fig_multi.update_xaxes(type="category", categoryorder="array", categoryarray=ORDEM_EIXO)
+        st.plotly_chart(fig_multi, use_container_width=True)
+        legenda_grafico(
+            "Média por rodada de monitoramento, padronizada (z-score) — útil para comparar tendências entre "
+            f"parâmetros de escalas diferentes, não para ler a magnitude original. Recorte: {descricao_recorte} "
+            f"(N={len(df_temporal)})."
+        )
 
 st.markdown("**Comparação em valores absolutos (dois eixos)**")
 bloco_interpretativo(

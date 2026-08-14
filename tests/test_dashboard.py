@@ -173,6 +173,23 @@ for caminho in PAGINAS:
         checar("Secao de corpos d'agua ao longo dos periodos presente", "RIO ITAPECURU" in texto)
         checar("Secao 03 usa 'períodos' (nao mais 'rodadas') no titulo", "ao longo dos períodos" in texto)
 
+        # secao 01: multiselect agora aceita ROBUSTO (7) + 6 MODERADO selecionados (13 opcoes)
+        ms_params = [m for m in at.multiselect if "Parâmetros" in m.label][0]
+        checar("Multiselect de parametros tem as 7 ROBUSTO + 6 MODERADO (13 opcoes)", len(ms_params.options) == 13)
+
+        # ponto com pouco dado para parametros MODERADO -- warning de exclusao, sem crash
+        ms_params.set_value(["TURBIDEZ", "PH", "NITRATO", "CLORETO_TOTAL"]).run(timeout=60)
+        at.selectbox(key="nivel_recorte_temporal").set_value("Ponto de coleta (RNQA)").run(timeout=60)
+        sel_rnqa4 = at.selectbox(key="valor_recorte_rnqa")
+        sel_rnqa4.set_value("MA-7185-I-9").run(timeout=60)
+        checar("Ponto MA-7185-I-9 com parametro MODERADO esparso carrega sem excecao", len(at.exception) == 0)
+        texto_ponto9 = "\n".join((m.value or "") for m in at.markdown)
+        checar(
+            "Aviso de parametro(s) excluido(s) por falta de dado aparece",
+            "excluído(s) deste gráfico por falta de dado" in texto_ponto9 and "Nitrato" in texto_ponto9,
+        )
+        at.selectbox(key="nivel_recorte_temporal").set_value("Toda a bacia").run(timeout=60)
+
     if caminho == "pages/5a_Galeria_Bacia_Toda.py":
         checar("Secao 'Relações esperadas pela literatura' presente", "Relações esperadas pela literatura" in texto)
         checar("Par Turbidez x Solidos Suspensos citado nas relacoes esperadas", "Sólidos Suspensos" in texto)
