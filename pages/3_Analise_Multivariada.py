@@ -27,6 +27,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 sys.path.insert(0, str(BASE_DIR / "scripts"))
 
+from config.conama import descricao_limite_conama  # noqa: E402
 from config.estilo import CORES, CORES_CLUSTER, DIVERGENTE_CORRELACAO  # noqa: E402
 from config.nomes_unidades import rotulo  # noqa: E402
 from dashboard_common import (  # noqa: E402
@@ -41,9 +42,11 @@ from dashboard_common import (  # noqa: E402
     carregar_silhouette,
     carregar_tipologia_pontos,
     construir_mapa_pontos,
+    explicacao_zscore,
     layout_editorial,
     legenda_grafico,
     limites_iqr_expandido,
+    linhas_referencia_conama,
     render_header,
     secao,
 )
@@ -242,6 +245,7 @@ for i, outro in enumerate(outros_parametros):
     )
     fig_sc.update_traces(marker=dict(color=CORES["petroleo"], size=6), selector=dict(mode="markers"))
     fig_sc.update_traces(line=dict(color=CORES["linha_tendencia"], width=2), selector=dict(mode="lines"))
+    linhas_referencia_conama(fig_sc, parametro_disp, eixo="y", mostrar_anotacao=False)
 
     n_fora_par = 0
     if not mostrar_tudo_disp:
@@ -270,10 +274,16 @@ if not mostrar_tudo_disp and total_fora_da_vista:
         f"{total_fora_da_vista} ponto(s), somados em todos os gráficos acima, ficam fora do intervalo "
         "visível e não aparecem nesta visualização — ative \"Mostrar todos os pontos\" para vê-los."
     )
+_desc_conama_disp = descricao_limite_conama(parametro_disp)
+nota_conama_disp = (
+    f" Linha vermelha tracejada horizontal: {_desc_conama_disp} para {rotulo(parametro_disp)} (eixo Y)."
+    if _desc_conama_disp
+    else ""
+)
 legenda_grafico(
     f"{len(outros_parametros) - n_ocultos} de {len(outros_parametros)} pares exibidos "
     f"(N ≥ 3 amostras em comum)." + (f" {n_ocultos} par(es) ocultos por N < 3." if n_ocultos else "")
-    + f" Recorte: {descricao_recorte3}." + nota_zoom
+    + f" Recorte: {descricao_recorte3}." + nota_zoom + nota_conama_disp
 )
 
 st.divider()
@@ -432,6 +442,13 @@ bloco_interpretativo(
     f"Os {n_pontos_pca} pontos formam {forca_tip} (k={melhor_k_tip}, silhouette={melhor_sil_tip:.2f}). "
     f"PC1+PC2 explicam {var_pc1_tip + var_pc2_tip:.0f}% da variância entre pontos."
 )
+
+st.caption(
+    "A coluna **Perfil** da tabela abaixo é lida em **Z-Score**: para cada cluster, mede quantos "
+    "desvios-padrão o valor típico de um parâmetro está da média entre os clusters — os dois parâmetros "
+    "com |z| maior viram a descrição \"acima/abaixo da média\"."
+)
+explicacao_zscore()
 
 # perfil textual de cada cluster: parametros mais destoantes da media geral entre clusters
 medias_gerais_tip = perfil_tip[variaveis_tip].mean()

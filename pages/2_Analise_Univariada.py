@@ -1,10 +1,13 @@
 """
 Pagina 2 -- Analise Univariada.
 
-Histograma interativo (Plotly, com zoom/pan nativos) por parametro, com
-filtros no corpo da pagina. Reusa dashboard_common.figura_histograma_interativo()
-e dashboard_common.badge_confiabilidade() para o selo de confiabilidade --
-nao recalcula nada, so filtra o CSV ja gerado.
+Distribuicao interativa (Plotly, com zoom/pan nativos) por parametro, com
+filtros no corpo da pagina e escolha de formato -- histograma em densidade +
+KDE, boxplot com pontos individuais (strip) ou violino. Reusa
+dashboard_common.figura_distribuicao_interativa(),
+dashboard_common.linhas_referencia_conama() para a linha de limite da
+Resolucao CONAMA 357/2005 e dashboard_common.badge_confiabilidade() para o
+selo de confiabilidade -- nao recalcula nada, so filtra o CSV ja gerado.
 
 Nota metodologica (repetida do script 01): os outliers marcados (coluna
 OUTLIER_<PARAMETRO>) foram calculados com o IQR do parametro inteiro (todas
@@ -26,6 +29,7 @@ import streamlit as st
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
+from config.conama import descricao_limite_conama  # noqa: E402
 from config.estilo import CORES  # noqa: E402
 from config.nomes_unidades import rotulo  # noqa: E402
 from dashboard_common import (  # noqa: E402
@@ -36,9 +40,10 @@ from dashboard_common import (  # noqa: E402
     carregar_dados,
     carregar_resumo_cobertura,
     categoria_parametro,
-    figura_histograma_interativo,
+    figura_distribuicao_interativa,
     layout_editorial,
     legenda_grafico,
+    linhas_referencia_conama,
     render_header,
     secao,
 )
@@ -147,6 +152,23 @@ with col_info:
         f"parâmetro (independente dos filtros acima) — ver página 1 para os critérios de N."
     )
 
+formato_dist = st.radio(
+    "Formato do gráfico",
+    ("Histograma + KDE", "Boxplot + pontos", "Violino"),
+    horizontal=True,
+    key="formato_distribuicao",
+    help="Todas as opções usam a mesma paleta editorial e uma escala legível — o histograma vem "
+    "normalizado em densidade (área = 1), não em contagem bruta; boxplot e violino mostram os pontos "
+    "individuais (strip com jitter) além dos quartis.",
+)
+
+desc_conama = descricao_limite_conama(parametro_sel)
+if desc_conama:
+    st.caption(
+        f"**Limite legal — {desc_conama}.** A linha vermelha tracejada nos gráficos desta página marca "
+        "esse valor (enquadramento assumido: águas doces, Classe 2 da Resolução CONAMA 357/2005)."
+    )
+
 serie = df_filtrado[parametro_sel].dropna()
 n_filtro = len(serie)
 
@@ -155,13 +177,15 @@ if n_filtro == 0:
 else:
     if n_filtro < 5:
         bloco_interpretativo(
-            f"Apenas N={n_filtro} amostra(s) no recorte atual — histograma pouco informativo com uma "
-            "amostra tão pequena, mas exibido mesmo assim para referência."
+            f"Apenas N={n_filtro} amostra(s) no recorte atual — distribuição pouco informativa com uma "
+            "amostra tão pequena, mas exibida mesmo assim para referência."
         )
 
     outlier_mask = df_filtrado.loc[serie.index, f"OUTLIER_{parametro_sel}"] == True  # noqa: E712
 
-    fig = figura_histograma_interativo(serie, rotulo_eixo=rotulo_param, cor=CORES["petroleo"])
+    fig = figura_distribuicao_interativa(serie, tipo=formato_dist, rotulo_eixo=rotulo_param, cor=CORES["petroleo"])
+    eixo_conama = "x" if formato_dist == "Histograma + KDE" else "y"
+    linhas_referencia_conama(fig, parametro_sel, eixo=eixo_conama)
     layout_editorial(fig, height=420, margin=dict(l=10, r=10, t=20, b=10))
     st.plotly_chart(fig, use_container_width=True)
 
@@ -207,9 +231,11 @@ else:
         labels={"CORPO_COM_N": "Corpo d'água", parametro_sel: rotulo_param},
         color_discrete_sequence=[CORES["petroleo"]],
     )
+    linhas_referencia_conama(fig_comp, parametro_sel, eixo="y")
     layout_editorial(fig_comp, height=440, margin=dict(l=10, r=10, t=20, b=10))
     st.plotly_chart(fig_comp, use_container_width=True)
     legenda_grafico(
         "Cada caixa é um corpo d'água, com o N do recorte atual indicado no eixo X. RIO ITAPECURU "
         "concentra a maior parte da amostra; caixas com poucas observações são menos confiáveis."
+        + (f" Linha vermelha tracejada: {desc_conama}." if desc_conama else "")
     )

@@ -22,6 +22,7 @@ from scipy.stats import gaussian_kde
 BASE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE_DIR))
 
+from config.conama import valores_linha_conama  # noqa: E402
 from config.estilo import CORES, CORES_STATUS, ROTULOS_CATEGORIA  # noqa: E402
 from config.nomes_unidades import NOMES_UNIDADES, rotulo  # noqa: E402,F401
 
@@ -254,6 +255,172 @@ def figura_histograma_interativo(serie: pd.Series, rotulo_eixo: str | None = Non
 
     fig.update_layout(xaxis_title=rotulo_eixo or "", yaxis_title="Contagem", bargap=0.02, showlegend=n >= 5)
     return fig
+
+
+# --------------------------------------------- distribuicao univariada (v2) ----
+
+_ROTULOS_DISTRIBUICAO = ("Histograma + KDE", "Boxplot + pontos", "Violino")
+
+
+def _tickformat_valor(serie: pd.Series) -> str:
+    """tickformat d3 legivel para o eixo que carrega os valores do parametro,
+    conforme a ordem de grandeza da serie (milhares com separador, decimais
+    so quando a escala e pequena)."""
+    vmax = float(pd.Series(serie).abs().max()) if len(serie) else 0.0
+    if vmax >= 1000:
+        return ",.0f"
+    if vmax >= 10:
+        return ".0f"
+    if vmax >= 1:
+        return ".1f"
+    return ".2f"
+
+
+def figura_distribuicao_interativa(
+    serie: pd.Series,
+    tipo: str = "Histograma + KDE",
+    rotulo_eixo: str | None = None,
+    cor: str | None = None,
+) -> go.Figure:
+    """Distribuicao de um parametro em 3 formatos alternativos, todos na
+    linguagem visual editorial (fundo branco, verde-petroleo solido, paleta
+    Okabe-Ito, sem variacao de opacidade para diferenciar categoria).
+
+      "Histograma + KDE" : histograma em DENSIDADE (area = 1) + curva KDE real
+                           sobreposta -- leitura de forma da distribuicao numa
+                           escala normalizada (nao "contagem bruta").
+      "Boxplot + pontos" : quartis/mediana/media + TODOS os pontos individuais
+                           (strip com jitter) -- dispersao e concentracao sem
+                           esconder amostra pequena.
+      "Violino"          : densidade espelhada (KDE) + caixa interna + pontos.
+
+    O parametro fica no eixo X no histograma e no eixo Y no boxplot/violino
+    (convencao de cada grafico). `rotulo_eixo` deve trazer a unidade de medida
+    (use config.nomes_unidades.rotulo). A linha da CONAMA 357 NAO e desenhada
+    aqui -- a pagina chama linhas_referencia_conama() escolhendo o eixo certo
+    (eixo="x" para histograma, eixo="y" para boxplot/violino).
+    """
+    cor = cor or CORES["petroleo"]
+    rotulo_eixo = rotulo_eixo or ""
+    serie = pd.Series(serie).dropna()
+    n = len(serie)
+    param_no_eixo_x = tipo == "Histograma + KDE"
+
+    fig = go.Figure()
+
+    if tipo == "Boxplot + pontos":
+        fig.add_trace(
+            go.Box(
+                y=serie, name="", boxmean=True, boxpoints="all", jitter=0.5, pointpos=0,
+                marker=dict(color=cor, size=5, opacity=0.55),
+                line=dict(color=CORES["petroleo_escuro"]),
+                fillcolor="rgba(27,120,55,0.10)", width=0.5,
+            )
+        )
+        fig.update_layout(yaxis_title=rotulo_eixo, xaxis_title="", showlegend=False)
+        fig.update_xaxes(showticklabels=False)
+    elif tipo == "Violino":
+        fig.add_trace(
+            go.Violin(
+                y=serie, name="", points="all", jitter=0.5, pointpos=0,
+                meanline_visible=True, box_visible=True, spanmode="hard",
+                marker=dict(color=cor, size=4, opacity=0.5),
+                line=dict(color=CORES["petroleo_escuro"]),
+                fillcolor="rgba(27,120,55,0.18)",
+            )
+        )
+        fig.update_layout(yaxis_title=rotulo_eixo, xaxis_title="", showlegend=False)
+        fig.update_xaxes(showticklabels=False)
+    else:  # Histograma + KDE
+        n_bins = min(40, max(10, int(np.sqrt(n) * 2)))
+        contagens, bordas = np.histogram(serie, bins=n_bins, density=True)
+        centros = (bordas[:-1] + bordas[1:]) / 2
+        largura_bin = bordas[1] - bordas[0]
+        fig.add_trace(
+            go.Bar(x=centros, y=contagens, width=largura_bin * 0.95, marker_color=cor, name="densidade (histograma)")
+        )
+        if n >= 5 and serie.std() > 1e-9:
+            kde = gaussian_kde(serie)
+            xs = np.linspace(serie.min(), serie.max(), 200)
+            fig.add_trace(
+                go.Scatter(x=xs, y=kde(xs), mode="lines", line=dict(color=CORES["linha_tendencia"], width=2), name="densidade (KDE)")
+            )
+        fig.update_layout(xaxis_title=rotulo_eixo, yaxis_title="Densidade (área = 1)", bargap=0.02, showlegend=n >= 5)
+
+    eixo_valor = fig.update_xaxes if param_no_eixo_x else fig.update_yaxes
+    eixo_valor(tickformat=_tickformat_valor(serie))
+    return fig
+
+
+def linhas_referencia_conama(fig: go.Figure, parametro: str, eixo: str = "y", *, mostrar_anotacao: bool = True) -> go.Figure:
+    """Desenha no `fig` (Plotly) a(s) linha(s) de limite da Resolucao CONAMA
+    357/2005 para `parametro`, lidas do dicionario centralizado em
+    config/conama.py. No-op silencioso quando o parametro nao tem limite
+    mapeado -- pode ser chamada em qualquer grafico sem verificacao previa.
+
+    eixo="y" -> linhas horizontais (add_hline): parametro no eixo Y
+                (boxplot/violino/serie temporal/comparacao entre grupos).
+    eixo="x" -> linhas verticais (add_vline): parametro no eixo X (histograma).
+
+    Estilo: vermelho tracejado (CORES["linha_conama"], papel reservado a limite
+    legal), rotulo "CONAMA 357: máx <valor> <unidade>" (ou "mín", ou as duas
+    linhas de uma faixa como no pH). Retorna o proprio fig para encadear.
+    """
+    linhas = valores_linha_conama(parametro)
+    if not linhas:
+        return fig
+    add_linha = fig.add_hline if eixo == "y" else fig.add_vline
+    posicoes = ("top left", "bottom left") if eixo == "y" else ("top right", "bottom right")
+    for i, (valor, texto) in enumerate(linhas):
+        kwargs = dict(line_dash="dash", line_color=CORES["linha_conama"], line_width=1.6)
+        if mostrar_anotacao:
+            kwargs.update(
+                annotation_text=texto,
+                annotation_position=posicoes[i % len(posicoes)],
+                annotation_font_color=CORES["linha_conama"],
+                annotation_font_size=10,
+                annotation_bgcolor="rgba(255,255,255,0.75)",
+            )
+        add_linha(valor, **kwargs)
+    return fig
+
+
+def explicacao_zscore() -> None:
+    """Bloco explicativo (st.expander) sobre o Z-Score, em linguagem acessivel
+    -- reutilizar em toda pagina que padroniza dados (paginas 3 e 4)."""
+    with st.expander("O que é o Z-Score (padronização)?"):
+        st.markdown(
+            r"""
+O **Z-Score** (ou escore padronizado) responde a uma pergunta simples:
+*"este valor está longe ou perto da média do conjunto?"* — e mede essa
+distância em **desvios-padrão**, não na unidade original do parâmetro.
+
+**Fórmula:** &nbsp; $z = \dfrac{x - \mu}{\sigma}$ &nbsp; — onde $x$ é o valor
+observado, $\mu$ (mi) é a **média** e $\sigma$ (sigma) é o **desvio-padrão**
+do parâmetro.
+
+| Z-Score | Interpretação |
+|---|---|
+| $z = 0$ | valor exatamente na média |
+| $z = +1$ | um desvio-padrão **acima** da média |
+| $z = -2$ | dois desvios-padrão **abaixo** da média |
+| $\lvert z\rvert > 2$ | valor **atípico** — numa distribuição normal, só ~5% das observações ficam tão longe da média |
+| $\lvert z\rvert > 3$ | valor **fortemente anômalo** — menos de ~0,3% das observações |
+
+**Por que aparece aqui:** os parâmetros de qualidade da água têm escalas e
+unidades muito diferentes (pH ~7; turbidez em centenas de UNT; condutividade
+em milhares de µS/cm). Convertendo cada parâmetro em Z-Score, todos passam a
+ter média 0 e desvio-padrão 1 — só então é possível **comparar tendências e
+detectar valores atípicos** entre parâmetros no mesmo gráfico. Um ponto com
+$\lvert z\rvert$ alto é candidato a **anomalia** (evento de chuva, lançamento
+pontual, falha de medição) e merece verificação.
+
+*O Z-Score não substitui o critério de outlier por IQR da página 2 (mais
+robusto a distribuições assimétricas) nem os limites legais da Resolução
+CONAMA 357/2005 (linha vermelha tracejada nos gráficos) — cada um responde a
+uma pergunta diferente.*
+"""
+        )
 
 
 # ---------------------------------------------------------------- dados ----

@@ -83,3 +83,11 @@ DIVERGENTE_CORRELACAO = [
 # qualquer grafico -- preto solido, contraste neutro que nao compete com as
 # cores categoricas de CORES_SEQUENCIA
 CORES["linha_tendencia"] = "#000000"
+
+# vermelho reservado EXCLUSIVAMENTE para as linhas de limite legal da Resolucao
+# CONAMA 357/2005 (add_hline/add_vline tracejado, ver config/conama.py +
+# dashboard_common.linhas_referencia_conama). Papel proprio -- nao e serie de
+# dado nem badge de confiabilidade -- por isso um tom deliberadamente distinto
+# do vermelho "pouco" (#C23B3B) dos badges: aqui a linha significa sempre
+# "limite regulatorio", em qualquer pagina.
+CORES["linha_conama"] = "#D1332E"

@@ -26,6 +26,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
@@ -33,6 +34,7 @@ import streamlit as st
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
+from config.conama import descricao_limite_conama  # noqa: E402
 from config.estilo import CORES, CORES_SEQUENCIA  # noqa: E402
 from config.nomes_unidades import rotulo  # noqa: E402
 from dashboard_common import (  # noqa: E402
@@ -42,8 +44,10 @@ from dashboard_common import (  # noqa: E402
     bloco_interpretativo,
     carregar_dados,
     carregar_grupos_robusto_moderado_baixo,
+    explicacao_zscore,
     layout_editorial,
     legenda_grafico,
+    linhas_referencia_conama,
     render_header,
     secao,
     tabela_periodos,
@@ -87,6 +91,7 @@ bloco_interpretativo(
     "serem diferentes. **Os valores no eixo Y são padronizados — não estão na unidade original do "
     "parâmetro.**"
 )
+explicacao_zscore()
 
 st.markdown("**Recorte espacial**")
 st.caption(
@@ -198,27 +203,38 @@ else:
             f"(N={len(df_temporal)})."
         )
 
-st.markdown("**Comparação em valores absolutos (dois eixos)**")
+st.markdown("**Comparação em valores absolutos (dois gráficos lado a lado)**")
 bloco_interpretativo(
-    "Aqui os dois parâmetros ficam nas **unidades originais** (não padronizadas), cada um com sua "
-    "própria escala: a legenda/eixo da **esquerda** (linha verde, círculos) é do primeiro parâmetro; a da "
-    "**direita** (linha azul, tracejada, losangos) é do segundo. Como as escalas são independentes, compare o "
-    "formato/tendência das curvas — não a posição vertical de uma linha em relação à outra."
+    "Aqui cada parâmetro fica na **sua unidade original** (não padronizada), em **gráficos "
+    "independentes lado a lado** — cada um com seu próprio título e eixo Y. O eixo X (rodadas de "
+    "monitoramento) é o mesmo nos dois, então compare o **formato/tendência** das curvas. Onde o "
+    "parâmetro tem limite da Resolução CONAMA 357/2005, ele aparece como linha vermelha tracejada."
 )
 
 _default_esq = "TURBIDEZ" if "TURBIDEZ" in robusto else robusto[0]
 _default_dir = "OXIGENIO_DISSOLVIDO" if "OXIGENIO_DISSOLVIDO" in robusto else robusto[min(1, len(robusto) - 1)]
 
-col_esq, col_dir = st.columns(2)
-param_esq = col_esq.selectbox(
-    "Parâmetro (eixo esquerdo)", robusto, format_func=rotulo, index=robusto.index(_default_esq), key="param_abs_esq"
+col_sel_esq, col_sel_dir = st.columns(2)
+param_esq = col_sel_esq.selectbox(
+    "Parâmetro — gráfico da esquerda", robusto, format_func=rotulo, index=robusto.index(_default_esq), key="param_abs_esq"
 )
-param_dir = col_dir.selectbox(
-    "Parâmetro (eixo direito)", robusto, format_func=rotulo, index=robusto.index(_default_dir), key="param_abs_dir"
+param_dir = col_sel_dir.selectbox(
+    "Parâmetro — gráfico da direita", robusto, format_func=rotulo, index=robusto.index(_default_dir), key="param_abs_dir"
+)
+
+_mesma_unidade = rotulo(param_esq) != rotulo(param_dir) and (
+    rotulo(param_esq).split("(")[-1] == rotulo(param_dir).split("(")[-1] and "(" in rotulo(param_esq)
+)
+forcar_escala = st.checkbox(
+    "Usar a mesma escala no eixo Y dos dois gráficos",
+    value=False,
+    key="abs_mesma_escala",
+    help="Só faz sentido quando os dois parâmetros estão na mesma unidade de medida — aí a comparação "
+    "visual da magnitude fica honesta. Com unidades diferentes, mantenha desmarcado.",
 )
 
 if param_esq == param_dir:
-    bloco_interpretativo("Escolha dois parâmetros diferentes para comparar nos dois eixos.")
+    bloco_interpretativo("Escolha dois parâmetros diferentes para comparar.")
 elif n_periodos_recorte < 2:
     bloco_interpretativo(
         f"O recorte **{descricao_recorte}** tem dados em menos de 2 rodadas distintas — não dá para "
@@ -227,53 +243,52 @@ elif n_periodos_recorte < 2:
 else:
     media_periodo_abs = agrupar_por_periodo(df_temporal, tab_periodos, [param_esq, param_dir])
 
-    fig_dual = go.Figure()
-    fig_dual.add_trace(
-        go.Scatter(
-            x=media_periodo_abs.index,
-            y=media_periodo_abs[param_esq],
-            mode="lines+markers",
-            name=rotulo(param_esq),
-            line=dict(color=CORES["petroleo"], width=2.6),
-            marker=dict(size=8),
-            yaxis="y1",
+    range_y_comum = None
+    if forcar_escala:
+        vals = media_periodo_abs[[param_esq, param_dir]].to_numpy(dtype="float64")
+        vals = vals[~np.isnan(vals)]
+        if len(vals):
+            margem = (vals.max() - vals.min()) * 0.08 or 1.0
+            range_y_comum = [float(vals.min() - margem), float(vals.max() + margem)]
+
+    def _fig_serie_periodo(param: str) -> go.Figure:
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=media_periodo_abs.index,
+                y=media_periodo_abs[param],
+                mode="lines+markers",
+                name=rotulo(param),
+                line=dict(color=CORES["petroleo"], width=2.6),
+                marker=dict(size=8),
+            )
         )
-    )
-    _cor_dir = CORES_SEQUENCIA[2]
-    fig_dual.add_trace(
-        go.Scatter(
-            x=media_periodo_abs.index,
-            y=media_periodo_abs[param_dir],
-            mode="lines+markers",
-            name=rotulo(param_dir),
-            line=dict(color=_cor_dir, width=2.6, dash="dot"),
-            marker=dict(size=8, symbol="diamond"),
-            yaxis="y2",
+        linhas_referencia_conama(fig, param, eixo="y")
+        layout_editorial(
+            fig,
+            height=430,
+            margin=dict(l=10, r=10, t=44, b=10),
+            title=rotulo(param),
+            xaxis_title="Rodada de monitoramento (PERIODO)",
+            yaxis_title=rotulo(param),
+            showlegend=False,
         )
-    )
-    layout_editorial(
-        fig_dual,
-        height=460,
-        margin=dict(l=10, r=10, t=20, b=10),
-        xaxis_title="Rodada de monitoramento (PERIODO)",
-        yaxis=dict(
-            title=dict(text=rotulo(param_esq), font=dict(color=CORES["petroleo"])),
-            tickfont=dict(color=CORES["petroleo"]),
-        ),
-        yaxis2=dict(
-            title=dict(text=rotulo(param_dir), font=dict(color=_cor_dir)),
-            tickfont=dict(color=_cor_dir),
-            overlaying="y",
-            side="right",
-            showgrid=False,
-        ),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-    )
-    fig_dual.update_xaxes(type="category", categoryorder="array", categoryarray=ORDEM_EIXO)
-    st.plotly_chart(fig_dual, use_container_width=True)
+        fig.update_xaxes(type="category", categoryorder="array", categoryarray=ORDEM_EIXO)
+        if range_y_comum is not None:
+            fig.update_yaxes(range=range_y_comum)
+        return fig
+
+    col_g_esq, col_g_dir = st.columns(2)
+    col_g_esq.plotly_chart(_fig_serie_periodo(param_esq), use_container_width=True)
+    col_g_dir.plotly_chart(_fig_serie_periodo(param_dir), use_container_width=True)
+
+    _limites_txt = [
+        f"{rotulo(p)}: {descricao_limite_conama(p)}" for p in (param_esq, param_dir) if descricao_limite_conama(p)
+    ]
     legenda_grafico(
-        f"Médias por rodada em unidade original. Esquerda (verde): {rotulo(param_esq)}. "
-        f"Direita (azul, tracejado): {rotulo(param_dir)}. Recorte: {descricao_recorte} (N={len(df_temporal)})."
+        f"Médias por rodada, em unidade original, em dois gráficos independentes. Recorte: {descricao_recorte} "
+        f"(N={len(df_temporal)})."
+        + (" Linhas vermelhas tracejadas — " + "; ".join(_limites_txt) + "." if _limites_txt else "")
     )
 
 st.divider()
@@ -308,12 +323,14 @@ for coluna, param in zip([col_tb, col_vz], ["TURBIDEZ", "VAZAO"]):
         labels={"GRUPO_N": "", param: rotulo(param)},
         color_discrete_sequence=[CORES["petroleo"]],
     )
+    linhas_referencia_conama(fig_chuva, param, eixo="y")
     layout_editorial(fig_chuva, height=400, margin=dict(l=10, r=10, t=40, b=10), title=rotulo(param))
     coluna.plotly_chart(fig_chuva, use_container_width=True)
 
 legenda_grafico(
     "Grupos definidos pela coluna CHOVEU_EM_24H (registro de chuva nas 24h anteriores à coleta); "
     "N de cada grupo indicado no eixo X. Amostras sem esse registro foram excluídas da comparação."
+    + (f" Linha vermelha tracejada (Turbidez): {descricao_limite_conama('TURBIDEZ')}." if descricao_limite_conama("TURBIDEZ") else "")
 )
 
 st.divider()
@@ -345,6 +362,7 @@ for i, corpo in enumerate(contagem_corpo_total.index.tolist()):
             marker=dict(size=9 if eh_principal else 6, color=cor),
         )
     )
+linhas_referencia_conama(fig_corpos, param_corpos, eixo="y")
 layout_editorial(
     fig_corpos,
     height=460,
